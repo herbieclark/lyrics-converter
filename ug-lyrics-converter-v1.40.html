@@ -1,0 +1,1585 @@
+<!DOCTYPE html>
+<!--
+================================================================================
+UG Lyrics Converter — version 1.40 — how this file is meant to be changed
+================================================================================
+
+WHAT IT IS
+  One self-contained page: no build step, no dependencies, no network calls.
+  Everything runs in the browser, so lyrics never leave the machine. Keep it
+  that way — the offline guarantee is the reason it can be shared as a file.
+
+THE ONE RULE THAT CANNOT BE RELAXED
+  The syllable code only ever inserts hyphens. Before a word is returned it is
+  compared with the original with the hyphens removed; if anything else changed,
+  the original is returned untouched. No letter is ever dropped, added or
+  reordered there. This is what keeps y'all from turning into yall, and every
+  code path that touches words ends with that check.
+
+  Letters are changed in exactly one place, deliberately and from a fixed list:
+  the ELISIONS table. A sung elision is one syllable shorter than the full word,
+  which is why it is spelled that way, so each entry carries both the full
+  spelling and its own division: mem'ry -> memo-ry while memory -> me-mo-ry,
+  sev'ral -> seve-ral while several -> se-ve-ral. Keep it a table of known words,
+  never a guess. Contractions are not elisions — don't, y'all, it's, I'm stay as
+  they are.
+
+WHEN THE RULES ARE UNSURE
+  Under-split rather than risk a wrong break. A word that comes back whole is a
+  small annoyance; a wrong hyphen is wrong in print. The same logic drives the
+  Genius block filter: when a title/artist pair is not clearly a pair, it stays.
+
+RULE FIRST, TABLE SECOND
+  Prefer a rule that generalises. Reach for a table only when the spelling
+  genuinely cannot tell the cases apart — pia-no against tri-al, as-te-roid
+  against sto-ic, wa-ter against cold-er. Six tables exist for that:
+    WORD_EXCEPTIONS   single irregular words, written as full patterns
+    COMPOUNDS         compounds; each part is hyphenated on its own
+    COMPOUND_PREFIXES first elements that can start any word
+    ER_NOT_SUFFIX     words that merely happen to end in -er
+    SUFFIX_DOUBLED    one-syllable roots that double s/z before a suffix
+    ROOT_DOUBLED      roots that already end in a doubled consonant
+  Adding a word is one line; -s/-es/-ed/-ing/-ly/-ness forms are derived.
+
+DECISIONS ALREADY TAKEN (do not undo them by accident)
+  * does-n't, not does-'nt — moving the n across the apostrophe would reorder
+    letters and break the invariant above. is-n't and does-n't are consistent.
+  * n't splits after a consonant sound, not after a vowel or r: have-n't and
+    is-n't, but aren't, don't, can't, weren't.
+  * -er breaks before the ending (cold-er, sing-er) because the root has to stay
+    readable; ER_NOT_SUFFIX holds the words where -er is not an ending at all.
+  * -ll -ss -ff -zz in a one-syllable root belong to the root (fall-ing), while
+    doubling produced by the suffix splits (get-ting). The one-syllable test is
+    what keeps con-trol-ling and tra-vel-ling right.
+  * Roman numbering is removed only at the start of a line, so a sentence that
+    ends in "I." survives.
+  * Italian and Spanish join vowel to vowel across words (sinalefe/sinalefa) and
+    French joins a liaison consonant, both with the same plus as the Slavic
+    prepositions. The join runs before the accents are stripped, because a stressed
+    vowel is exactly what blocks it.
+  * The one-letter preposition plus (W+, z+, s+, k+) is tied to the Slavic
+    languages. It used to run everywhere, which turned "Jay-Z my friend" into
+    "Jay Z+my friend" once the hyphen became a space.
+  * Mr. and Mrs. become M-r. and M-rs. — an earlier version spelled them out as
+    Mis-ter; that was replaced on purpose.
+  * ev'ry is rewritten as eve-ry. The first version of the program deliberately
+    refused to touch it; that was reversed later on request, which is why the
+    rewrite lives in its own table and not in the rules. The elided forms keep the
+    sung syllable count, so mem'ry and sev'ral are divided in two, not three.
+  * German umlauts are spelled out (ae oe ue) rather than stripped, and the pair
+    counts as one vowel so Kue-che still splits like Kue-che.
+  * A one-letter first and last syllable are allowed (e-ven, vi-de-o); this is
+    why the language rules can afford to be conservative elsewhere.
+
+LANGUAGES
+  LANGS holds one entry per language. English morphology (-ed -es -ing -er -ly
+  -gue n't, the tables, initialisms) is gated behind CFG.morphology and is off
+  for every other language. Silent final -e is English and French only. Do not
+  add English habits to another language's entry.
+
+VERSION
+  The minor number counts the rounds of changes the program has been through:
+  1.40 is the fortieth. Bump it by one with every change you hand back — even a
+  one-word fix — so a file can always be placed in the sequence. The number lives
+  in three places and they must stay in step: this comment, the line under the
+  title on the page, and the file name. Name the reference list to match.
+
+HOW TO CHANGE SOMETHING
+  Edit this file in place; do not regenerate it from scratch. A rewrite loses
+  the tables and the edge cases while still looking like it works. After any
+  change, run the pairs in syllable-reference.md: every one of them was agreed
+  during development, and a pair that stops matching means the change broke
+  something that was already settled.
+================================================================================
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UG Lyrics Converter</title>
+<style>
+  :root{
+    --paper:#E8EAE4;
+    --card:#F8F9F6;
+    --ink:#161A18;
+    --mid:#5D6660;
+    --rule:#C5CBC0;
+    --accent:#26564A;
+    --accent-ink:#F8F9F6;
+  }
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    margin:0;
+    background:var(--paper);
+    color:var(--ink);
+    font:16px/1.5 "Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:28px 20px 40px}
+
+  /* header: a staff line the title sits on */
+  header{position:relative;margin-bottom:26px}
+  header::before{
+    content:"";position:absolute;left:0;right:0;top:20px;height:33px;
+    background:repeating-linear-gradient(to bottom,var(--rule) 0 1px,transparent 1px 8px);
+  }
+  h1{
+    position:relative;display:inline-block;margin:0;
+    background:var(--paper);padding:8px 14px 8px 0;
+    font-size:clamp(24px,4.2vw,38px);font-weight:600;letter-spacing:-.01em;
+  }
+  .sub{position:relative;background:var(--paper);display:inline-block;
+    margin:6px 0 0;padding:2px 10px 2px 0;color:var(--mid);max-width:66ch}
+  .version{font:12.5px/1.3 ui-monospace,Menlo,Consolas,monospace;color:var(--rule)}
+
+  .settings{
+    background:var(--card);border:1px solid var(--rule);
+    padding:14px 16px;margin-bottom:14px;border-radius:3px;
+  }
+  .opts{display:flex;flex-wrap:wrap;gap:8px 26px;align-items:center}
+  label.opt{display:flex;align-items:baseline;gap:8px;cursor:pointer;line-height:1.35}
+  label.opt input{margin:0;transform:translateY(2px);accent-color:var(--accent);
+    width:16px;height:16px;flex:0 0 auto}
+  .opt code{font:13px/1.3 ui-monospace,"SF Mono",Menlo,Consolas,monospace;color:var(--mid)}
+  .divider{border:0;border-top:1px solid var(--rule);margin:12px 0}
+  .always{color:var(--mid);font-size:14px;margin:0}
+  .always code{font:12.5px/1.3 ui-monospace,Menlo,Consolas,monospace}
+  select{font:inherit;font-size:15px;padding:4px 6px;border:1px solid var(--rule);
+    border-radius:3px;background:#fff;color:var(--ink)}
+
+  .panes{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .pane{display:flex;flex-direction:column;min-width:0}
+  .pane h2{margin:0 0 6px;font-size:15px;font-weight:600}
+  .pane h2 span{color:var(--mid);font-weight:400}
+  textarea{
+    width:100%;min-height:46vh;resize:vertical;padding:12px 13px;
+    background:var(--card);color:var(--ink);
+    border:1px solid var(--rule);border-radius:3px;
+    font:14px/1.65 ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    white-space:pre-wrap;
+  }
+  textarea#out{background:#FFFFFF}
+  textarea.drop{border-color:var(--accent);border-style:dashed}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  .bar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:14px}
+  button,.filebtn{
+    font:inherit;font-size:15px;padding:8px 15px;border-radius:3px;
+    border:1px solid var(--accent);background:transparent;color:var(--accent);
+    cursor:pointer;
+  }
+  button.primary{background:var(--accent);color:var(--accent-ink)}
+  button:hover,.filebtn:hover{background:var(--accent);color:var(--accent-ink)}
+  button.ghost{border-color:var(--rule);color:var(--mid)}
+  button.ghost:hover{background:var(--rule);color:var(--ink)}
+  .filebtn{display:inline-block}
+  .filebtn input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+  .status{margin-left:auto;color:var(--mid);font-size:14px;text-align:right}
+
+  details{margin-top:22px;border-top:1px solid var(--rule);padding-top:12px}
+  summary{cursor:pointer;font-weight:600}
+  details .body{max-width:78ch;color:var(--mid)}
+  details h3{color:var(--ink);font-size:15px;margin:16px 0 4px}
+  details code{font:13px/1.4 ui-monospace,Menlo,Consolas,monospace;
+    background:var(--card);border:1px solid var(--rule);padding:0 3px;border-radius:2px}
+  table{border-collapse:collapse;margin:6px 0;font-size:14px}
+  th,td{border-bottom:1px solid var(--rule);padding:4px 16px 4px 0;text-align:left;font-weight:400}
+  th{color:var(--ink);font-weight:600}
+
+  @media (max-width:880px){
+    .panes{grid-template-columns:1fr}
+    textarea{min-height:32vh}
+    .status{margin-left:0;width:100%;text-align:left}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <h1>UG Lyrics Converter</h1>
+  <p class="sub">Cleans up lyrics and splits the words into syllables. Everything runs in your
+     browser — no text leaves this page. <span class="version">v1.40</span></p>
+</header>
+
+<section class="settings">
+  <div class="opts">
+    <label class="opt"><input type="checkbox" id="o-tags" checked>
+      Delete section tags <code>[Intro] [Verse 1]</code></label>
+    <label class="opt"><input type="checkbox" id="o-numbering" checked>
+      Delete numbering <code>I. II. III.</code></label>
+    <label class="opt"><input type="checkbox" id="o-round" checked>
+      Delete backing vocals <code>(Oh) (Yeah)</code></label>
+    <label class="opt"><input type="checkbox" id="o-hyphens" checked>
+      Replace existing hyphens with space <code>hip-hop → hip hop</code></label>
+  </div>
+  <hr class="divider">
+  <div class="opts">
+    <label class="opt"><input type="checkbox" id="o-syllables" checked>
+      Split words into syllables with hyphens</label>
+    <label class="opt" for="o-lang" style="cursor:default">Language of the lyrics:</label>
+    <select id="o-lang">
+      <option value="en" selected>English</option>
+      <option value="es">Spanish</option>
+      <option value="fr">French</option>
+      <option value="de">German</option>
+      <option value="it">Italian</option>
+      <option value="id">Bahasa Indonesia</option>
+      <option value="tl">Tagalog</option>
+      <option value="ko">Korean</option>
+      <option value="ja">Japanese</option>
+      <option value="ru">Russian</option>
+      <option value="uk">Ukrainian</option>
+      <option value="pl">Polish</option>
+    </select>
+  </div>
+</section>
+
+<div class="panes">
+  <div class="pane">
+    <h2>Source text <span>— paste it, or drop a file here</span></h2>
+    <textarea id="in" spellcheck="false" placeholder="[Verse 1]&#10;Mr. Brightside (Oh) — don’t look back…"></textarea>
+  </div>
+  <div class="pane">
+    <h2>Result</h2>
+    <textarea id="out" spellcheck="false" readonly></textarea>
+  </div>
+</div>
+
+<div class="bar">
+  <button class="primary" id="copy">Copy result</button>
+  <button id="download">Download .txt</button>
+  <label class="filebtn">Open file<input type="file" id="file" accept=".txt,.md,.srt,.lrc,.csv,text/*"></label>
+  <button id="swap">Result → source</button>
+  <button class="ghost" id="clear">Clear</button>
+  <span class="status" id="status">Paste or type some text</span>
+</div>
+
+<details>
+  <summary>What happens to the text</summary>
+  <div class="body">
+    <h3>Characters</h3>
+    <p><code>’ ‘ ‚ ‛ ‹ › ′ ´ ʼ</code> become <code>'</code>; <code>“ ” „ ‟ « » ″</code> become
+       <code>"</code>. A backtick <code>`</code> also becomes <code>'</code> — the reverse
+       replacement is not in the program at all. <code>– — ‒ ― − ‐ ‑</code> become a plain hyphen,
+       <code>…</code> becomes three dots, every kind of Unicode space becomes an ordinary one,
+       zero-width characters and soft hyphens are dropped, and <code>¿ ¡</code> are deleted.
+       Diacritics are removed through Unicode decomposition, so every caron, acute, grave, umlaut,
+       circumflex, tilde, cedilla, ring, macron, breve, ogonek and dot above is covered. Letters
+       without a decomposition are handled by table: <code>ß→ss</code>, <code>Ǽ→AE</code>,
+       <code>Æ Œ Ø Ł Đ Þ ı İ</code>. With German selected the umlauts are spelled out instead:
+       <code>ä ö ü</code> become <code>ae oe ue</code>, a capital one keeps only its first letter
+       capital (<code>Ärger → Aer-ger</code>) and turns fully capital only inside a word already in
+       capitals (<code>ÄPFEL → AEP-FEL</code>), so
+       <code>Mädchen</code> reads <code>Maedchen</code> and <code>hören</code> reads
+       <code>hoeren</code>. Each pair still counts as a single vowel when the word is split, which
+       keeps <code>Kue-che</code> and <code>Traeu-me</code> where <code>Kü-che</code> and
+       <code>Träu-me</code> break.</p>
+
+    <h3>Deletions and rewrites</h3>
+    <p>Square brackets go with their contents (<code>[Intro]</code>, <code>[Guitar Solo]</code>) when
+       that box is ticked, and so do round ones (<code>(Oh)</code>, <code>(Yeah)</code>). Untick the
+       backing vocals and only the round brackets go, since the words inside are still sung:
+       <code>(Oh) don't go</code> → <code>Oh don't go</code>. Roman
+       numbering at the start of a line goes too (<code>I.</code>, <code>IV.</code>, <code>VII.</code>);
+       elsewhere it is kept, so a sentence ending in <code>I.</code> survives. A line left empty by a
+       deletion is removed rather than left blank. The recommendation block Genius pastes into
+       lyrics — a <code>You might also like</code> line followed by up to three title-and-artist
+       pairs — is always removed. A group only counts as a pair when it is exactly two lines fenced
+       by blank lines, both short, free of sentence punctuation and not opening with the same
+       word, with the second line starting on a capital the way an artist name does; anything
+       else is left alone, so a couplet of your own survives.
+       <code>Mr.</code> and <code>Mrs.</code> are
+       spelled out as <code>M-r.</code> and <code>M-rs.</code> Contractions are left exactly as
+       they are: <code>don't</code>, <code>y'all</code>, <code>it's</code>, <code>I'm</code>. A one-letter <code>W</code> or
+       <code>V</code>, <code>S</code>, <code>Z</code> or
+       <code>K</code> is joined to the next word by a plus, the way Slavic prepositions are
+       sung: <code>W półlitrówce</code> → <code>W+pol-li-trow-ce</code>,
+       <code>z czterech</code> → <code>z+czte-rech</code>, <code>s nimi</code> →
+       <code>s+ni-mi</code>. This only happens with Russian, Ukrainian or Polish selected —
+       elsewhere a lone letter is a name or an initial, not a preposition, and is left
+       alone.</p>
+    <p>Italian and Spanish join two words with a plus where they are sung on one note:
+       a word ending in a vowel followed by a word beginning with one —
+       <code>pi-sa un</code> → <code>pi-sa+un</code>, <code>tutto il</code> →
+       <code>tut-to+il</code>, <code>mi amor</code> → <code>mi+a-mor</code>. A silent
+       <code>h</code> is no barrier (<code>l'ho+am-mo-scia-ta</code>,
+       <code>la+ho-ra</code>), while a stressed vowel on either side or a comma between
+       the words keeps them apart — in Italian only, since Spanish sings
+       <code>qué hacer</code> joined as <code>que+ha-cer</code>. Spanish <code>hie- hua-</code>
+       words stay separate too, and an accented <code>í</code> or <code>ú</code> breaks the
+       diphthong inside a word: <code>dí-a</code>, <code>ve-í-as</code>,
+       <code>fan-ta-sí-as</code>. French works the other way: the hiatus is kept, and what joins is the
+       liaison after a short function word — <code>les+a-mis</code>, <code>en+hi-ver</code>,
+       <code>tres+u-tile</code>, <code>ils+ont</code> — but never after <code>et</code> or
+       before an aspirate h (<code>les he-ros</code>, <code>en haut</code>).</p>
+
+    <h3>Existing hyphens</h3>
+    <p>A hyphen between letters or digits becomes a space: <code>hip-hop → hip hop</code>,
+       <code>24-7 → 24 7</code>. A dash standing on its own between words is dropped along with one
+       of its spaces: <code>she said - it's over → she said it's over</code>.</p>
+
+    <h3>Syllables</h3>
+    <p>Hyphens are only ever inserted. Before a word is returned it is checked against the original
+       with the hyphens removed — if anything else changed, the word is left alone. So no letter is
+       ever dropped, added or moved: <code>y'all</code> never turns into <code>yall</code>. The one
+       exception is the elision table in the script: a spelling like <code>mem'ry</code> is one
+       syllable short of <code>memory</code> on purpose, so it is rewritten in full and divided the
+       way it is sung — <code>memo-ry</code>, while a plain <code>memory</code> stays
+       <code>me-mo-ry</code>. That table is a fixed list of words, never a guess.</p>
+    <table>
+      <tr><th>rule</th><th>result</th></tr>
+      <tr><td>single-syllable words are never split</td><td>through, you, broad, rhyme, don't</td></tr>
+      <tr><td>past-tense <code>-ed</code> stays attached</td><td>pushed, de-signed, sur-prised, loved</td></tr>
+      <tr><td>after a d or t sound it is a syllable</td><td>want-ed, vi-sit-ed, punc-tu-a-ted, pad-ded</td></tr>
+      <tr><td>plural <code>-es</code> follows the same logic</td><td>genes, times, fa-ces, box-es, wish-es</td></tr>
+      <tr><td><code>-ing</code> and <code>-er</code> keep the root whole</td><td>look-ing, cold-er, long-er, furth-er, sing-er</td></tr>
+      <tr><td>unless <code>-er</code> is not an ending at all</td><td>wa-ter, mo-ther, un-der, re-mem-ber, an-swer</td></tr>
+      <tr><td>a doubled consonant splits between the two</td><td>get-ting, run-ning, big-ger, let-ter</td></tr>
+      <tr><td>a Cle cluster is a piece of its own before <code>-ing</code></td><td>strug-gl-ing, fid-dl-ing, daz-zl-ing, bub-bl-ing</td></tr>
+      <tr><td><code>-ion</code> closes the syllable before it</td><td>o-pin-ion, cush-ion, mil-lion · but re-gion, re-li-gion</td></tr>
+      <tr><td><code>-ern</code> and <code>-some</code> behave the same way</td><td>north-ern, west-ern · awe-some, lone-some, some-how</td></tr>
+      <tr><td>unless the root already ends in one</td><td>fall-ing, pass-ing, buzz-ing, tall-er, kill-er</td></tr>
+      <tr><td>two short tables settle the rest</td><td>gas-sing, quiz-zing · add-ing, add-ed, odd-er</td></tr>
+      <tr><td><code>-ing</code> after a vowel, and dropped-g <code>-in'</code></td><td>be-ing, do-ing, do-in', walk-in'</td></tr>
+      <tr><td><code>-ly -less -ness -ment -ful</code> are their own syllables</td><td>sad-ly, lone-ly, home-less, move-ment</td></tr>
+      <tr><td><code>-sm -thm</code> are syllables without a vowel</td><td>pri-sm, rhy-thm, sar-ca-sm</td></tr>
+      <tr><td>final <code>-gue</code> is silent</td><td>league, vague, plague, tongues</td></tr>
+      <tr><td><code>ck</code> closes the syllable before it</td><td>pock-et, chick-en, buck-et, check-ing</td></tr>
+      <tr><td><code>n't</code> splits after a consonant, not after a vowel</td><td>is-n't, does-n't · aren't, can't</td></tr>
+      <tr><td>two one-syllable words split at the seam</td><td>land-lord, sun-light, heart-break, door-way</td></tr>
+      <tr><td><code>over-</code> is a prefix of its own</td><td>o-ver-act, o-ver-sleep, o-ver-whelm-ing, o-ver-all</td></tr>
+      <tr><td>compounds split at the seam first</td><td>a-ny-thing, eve-ry-day, bare-foot, o-ver-sea</td></tr>
+      <tr><td>apostrophes can open a piece of their own</td><td>rock-'n'-roll, O'-Neill · eve-ry-bo-dy's, I'm</td></tr>
+      <tr><td>sung elisions come back in full, one syllable short</td><td>ev'ry → eve-ry, mem'ry → memo-ry, sev'ral → seve-ral</td></tr>
+      <tr><td>abbreviations are read out letter by letter</td><td>M-C, D-J, T-V, U-K, F-B-I, C-N-N, C-Ds</td></tr>
+      <tr><td>a swallowed syllable is written the way it is sung</td><td>choco-late, fami-ly, busi-ness, ope-ra, final-ly</td></tr>
+      <tr><td>irregular words come from a table in the file</td><td>peo-ple, pia-no, Pa-ra-no-ia, sto-ic, re-qui-em</td></tr>
+    </table>
+    <p>The rules are tuned for English. Pick another language and the English-specific parts switch
+       off — the <code>-ed/-es/-ing/-ly/-gue/n't</code> endings, the compound and exception tables —
+       while the vowel and consonant handling changes with it. A final <code>-e</code> counts as a
+       syllable everywhere except English and French. Each language keeps its own digraphs whole:
+       <code>cz sz rz dz szcz prz</code> for Polish, <code>sch</code> for German, <code>gn</code> for
+       French, <code>ll rr</code> for Spanish, <code>gn gl sc gh</code> for Italian, <code>ng ny</code>
+       for Bahasa Indonesia and Tagalog, <code>zh kh ts shch</code> for Russian and Ukrainian.
+       Spanish keeps <code>s</code> at the end of a syllable (<code>es-tre-lla</code>) while Italian
+       opens the next one with it (<code>que-sto</code>).</p>
+    <p>Korean, Japanese, Bahasa Indonesia and Tagalog are handled from their romanized spelling. For
+       Japanese every vowel is a mora and gets its own note, so each one becomes a syllable
+       (<code>a-ri-ga-to-u</code>, <code>ka-wa-i-i</code>) and <code>y</code> is always a consonant
+       (<code>kyo-u</code>). Korean keeps the Revised Romanization vowel pairs whole
+       (<code>eo eu ae oe ui</code>) and lets <code>ng</code> close a syllable
+       (<code>sa-rang-hae</code>). Indonesian and Tagalog split every vowel pair except their own
+       diphthongs (<code>sau-da-ra</code>, <code>ba-hay</code>).</p>
+    <p>Where the rules are unsure they under-split rather than risk a wrong break, so a few words come
+       back whole (<code>tired</code>, <code>hundreds</code> of exceptions aside). Two tables near the
+       top of the script hold everything the rules cannot work out — <code>WORD_EXCEPTIONS</code> for
+       single words, <code>COMPOUNDS</code> for compounds and <code>ER_NOT_SUFFIX</code> for words
+       that merely happen to end in <code>-er</code>; adding a line to any of them is enough, and
+       the <code>-s/-es/-ed/-ing/-ly/-ness</code> forms follow automatically. Words read both ways —
+       <code>blessed</code>, <code>learned</code>, <code>cursed</code>, <code>aged</code> — are left
+       whole on purpose.</p>
+  </div>
+</details>
+
+</div>
+
+<script>
+"use strict";
+
+/* ================================================================== */
+/* 1. Characters                                                      */
+/* ================================================================== */
+
+const QUOTES = {
+  "\u2018":"'","\u2019":"'","\u201A":"'","\u201B":"'","\u2039":"'","\u203A":"'",
+  "\u2032":"'","\u00B4":"'","\u02B9":"'","\u02BB":"'","\u02BC":"'","\u02C8":"'",
+  "\u0060":"'","\uFF07":"'",
+  "\u201C":'"',"\u201D":'"',"\u201E":'"',"\u201F":'"',"\u00AB":'"',"\u00BB":'"',
+  "\u2033":'"',"\u301D":'"',"\u301E":'"',"\uFF02":'"'
+};
+const DASHES = {
+  "\u2010":"-","\u2011":"-","\u2012":"-","\u2013":"-","\u2014":"-","\u2015":"-",
+  "\u2043":"-","\u2212":"-","\uFE58":"-","\uFE63":"-","\uFF0D":"-"
+};
+const ELLIPSIS = { "\u2026":"...","\u22EF":"...","\uFE19":"..." };
+const SPACES = {};
+for (const ch of ["\u0009","\u00A0","\u1680","\u2000","\u2001","\u2002","\u2003","\u2004",
+                  "\u2005","\u2006","\u2007","\u2008","\u2009","\u200A","\u202F","\u205F",
+                  "\u3000","\u180E"]) SPACES[ch] = " ";
+const INVISIBLE = {};
+for (const ch of ["\u00AD","\u200B","\u200C","\u200D","\u2060","\uFEFF"]) INVISIBLE[ch] = "";
+const INVERTED = { "\u00BF":"", "\u00A1":"" };   /* ¿ ¡ */
+
+/* Latin letters with no Unicode decomposition */
+const SPECIAL = {
+  "ß":"ss","\u1E9E":"SS",
+  "Ǽ":"AE","ǽ":"ae","Ǣ":"AE","ǣ":"ae","Æ":"AE","æ":"ae",
+  "Œ":"OE","œ":"oe",
+  "Ø":"O","ø":"o","Ǿ":"O","ǿ":"o",
+  "Đ":"D","đ":"d","Ð":"D","ð":"d",
+  "Þ":"Th","þ":"th",
+  "Ł":"L","ł":"l","Ħ":"H","ħ":"h","Ŧ":"T","ŧ":"t","Ŋ":"Ng","ŋ":"ng",
+  "ı":"i","İ":"I","ŉ":"'n",
+  "ﬁ":"fi","ﬂ":"fl","ﬀ":"ff","ﬃ":"ffi","ﬄ":"ffl","ẛ":"s","ſ":"s"
+};
+
+const CHAR_TABLE = Object.assign({}, QUOTES, DASHES, ELLIPSIS, SPACES, INVISIBLE, INVERTED);
+
+/* With German selected an umlaut is spelled out instead of losing its dots, the way
+   German does it when the letter is unavailable: Mädchen -> Maedchen, hören -> hoeren.
+   The pair that comes out counts as one vowel, so Kue-che and Traeu-me still split
+   where Kü-che and Träu-me do. */
+const GERMAN_UMLAUTS = { "\u00E4":"ae", "\u00F6":"oe", "\u00FC":"ue" };
+/* A capital umlaut keeps only its first letter capital — Ärger -> Aerger, Öl -> Oel —
+   and goes fully capital only inside a word already in capitals: ÄPFEL -> AEPFEL. */
+const GERMAN_UMLAUTS_CAPS = { "\u00C4":"Ae", "\u00D6":"Oe", "\u00DC":"Ue" };
+const UPPER = /\p{Lu}/u;
+
+function expandUmlauts(text){
+  const chars = [...text.normalize("NFC")];
+  let out = "", n = 0;
+  for (let i = 0; i < chars.length; i++){
+    const ch = chars[i];
+    const lower = GERMAN_UMLAUTS[ch];
+    if (lower !== undefined){ out += lower; n++; continue; }
+    const caps = GERMAN_UMLAUTS_CAPS[ch];
+    if (caps === undefined){ out += ch; continue; }
+    const next = chars[i + 1];
+    out += (next !== undefined && UPPER.test(next)) ? caps.toUpperCase() : caps;
+    n++;
+  }
+  return [out, n];
+}
+
+function mapChars(text){
+  let out = "", n = 0;
+  for (const ch of text){
+    const rep = CHAR_TABLE[ch];
+    if (rep === undefined) out += ch;
+    else { out += rep; n++; }
+  }
+  return [out, n];
+}
+
+const MN = /\p{Mn}/gu;
+const ASCII = /^[\x00-\x7F]*$/;
+
+function stripDiacritics(text){
+  let out = "", n = 0;
+  for (const ch of text){
+    const special = SPECIAL[ch];
+    if (special !== undefined){ out += special; n++; continue; }
+    const base = ch.normalize("NFD").replace(MN, "");
+    if (base && base !== ch && ASCII.test(base)){ out += base; n++; }
+    else out += ch;
+  }
+  return [out, n];
+}
+
+/* ================================================================== */
+/* 2. Deletions and rewrites                                          */
+/* ================================================================== */
+
+/* Genius pastes a recommendation block into the lyrics:
+     You might also like
+     <blank>
+     Title
+     Artist
+   up to three times. The header goes, and after it only groups that are exactly
+   two non-empty lines fenced by blank lines — so a real stanza is never touched. */
+const RECOMMEND_RE = /^\s*you\s+might\s+also\s+like\s*$/i;
+/* a line that is nothing but a section tag: [Chorus], [Verse 2] */
+const SECTION_LINE_RE = /^\s*\[[^\[\]\n]*\]\s*$/;
+
+/* A title-and-artist pair looks unlike a couplet of lyrics: both lines are short,
+   neither ends in sentence punctuation, and they do not open with the same word the
+   way a sung couplet usually does. Only the second line has to start with a capital,
+   because it is an artist name — a title can be written any way at all
+   ("yes, and? (extended mix)", "bad guy"). When a pair fails any of this it is kept:
+   leaving two stray lines is a much smaller problem than eating a line of lyrics. */
+function looksLikePair(title, artist){
+  const a = title.trim(), b = artist.trim();
+  if (!a || !b || a.length > 60 || b.length > 60) return false;
+  /* a section tag is never a title or an artist: [Chorus] and the line under it
+     are the song starting again, not a recommendation */
+  if (SECTION_LINE_RE.test(a) || SECTION_LINE_RE.test(b)) return false;
+  if (/[,.;:]$/.test(a) || /[,.;:!?]$/.test(b)) return false;
+  /* at least one of the two lines is capitalised: a title or an artist name.
+     Both may be lowercase in real life (bad guy, beabadoobee), but not both at
+     once in the same pair — that shape belongs to lyrics. */
+  if (/^[\p{Ll}]/u.test(a) && /^[\p{Ll}]/u.test(b)) return false;
+  const opener = s => s.split(/\s+/)[0].toLowerCase();
+  return opener(a) !== opener(b);
+}
+
+function stripRecommendations(text){
+  const lines = text.split("\n");
+  const kept = [];
+  let removed = 0;
+  for (let i = 0; i < lines.length; i++){
+    if (!RECOMMEND_RE.test(lines[i])){ kept.push(lines[i]); continue; }
+    removed++;
+    let j = i + 1;
+    for (let pair = 0; pair < 3; pair++){
+      let k = j;
+      while (k < lines.length && lines[k].trim() === "") k++;
+      if (k === j) break;                                   /* no blank line before it */
+      if (k + 1 >= lines.length) break;                     /* needs two lines */
+      if (lines[k].trim() === "" || lines[k+1].trim() === "") break;
+      if (!looksLikePair(lines[k], lines[k+1])) break;
+      /* the block ends at a blank line, at the end of the text, or right at the
+         next section tag — Genius often pastes it straight before [Chorus].
+         The first group has to end that way; once a pair has been accepted the
+         song may also resume immediately, with no blank line of its own. */
+      const after = k + 2;
+      const ends = after >= lines.length || lines[after].trim() === "" ||
+                   SECTION_LINE_RE.test(lines[after]);
+      if (!ends && pair === 0) break;                       /* three lines: lyrics */
+      j = after;
+      removed += 2;
+    }
+    /* the block sat between two parts of the song: leave a blank line so they do
+       not run together into one stanza */
+    if (j > i + 1 && j < lines.length) kept.push("");
+    i = j - 1;
+  }
+  let out = kept.join("\n");
+  if (removed) out = out.replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "");
+  return [out, removed];
+}
+
+const SQUARE_RE = /\[[^\[\]\n]*\]/g;
+const ROUND_RE  = /\([^()\n]*\)/g;
+/* roman numbering only at the start of a line, so "so did I." survives */
+const ROMAN_RE  = /^[ \t]*(?=[IVXLCDM])M{0,3}(?:CM|CD|D?C{0,3})(?:XC|XL|L?X{0,3})(?:IX|IV|V?I{0,3})\.[ \t]*/;
+
+function stripMarkers(text, tags, round, numbering){
+  let removed = 0;
+  const kept = [];
+  for (const line of text.split("\n")){
+    let cleaned = line;
+    if (tags && cleaned.includes("[")) cleaned = cleaned.replace(SQUARE_RE, () => { removed++; return ""; });
+    if (cleaned.includes("(")){
+      /* ticked: the backing vocal goes with its brackets. Unticked: only the
+         brackets go, because the words inside are still sung — (Oh) -> Oh */
+      cleaned = round ? cleaned.replace(ROUND_RE, () => { removed++; return ""; })
+                      : cleaned.replace(ROUND_RE, m => { removed++; return m.slice(1, -1); });
+    }
+    if (numbering && ROMAN_RE.test(cleaned)) cleaned = cleaned.replace(ROMAN_RE, () => { removed++; return ""; });
+    if (cleaned === line){ kept.push(line); continue; }
+    /* a line that held nothing but markers disappears instead of going blank */
+    if (cleaned.trim() === "" && line.trim() !== "") continue;
+    kept.push(cleaned.replace(/[ \t]{2,}/g, " ").trim());
+  }
+  let out = kept.join("\n");
+  if (removed) out = out.replace(/\n{3,}/g, "\n\n");
+  return [out, removed];
+}
+
+/* A one-letter preposition is sung joined to the next word: W półlitrówce ->
+   W+półlitrówce, z czterech -> z+czterech, s nimi -> s+nimi. Only for Russian,
+   Ukrainian and Polish: a lone V, W, S or Z in an English lyric is a name or an
+   initial, never a preposition, so nothing is joined in the other languages. */
+const PREPOSITION_LETTERS = { ru:"vwszk", uk:"vwszk", pl:"vwszk" };
+
+function prepositionRe(lang){
+  const letters = PREPOSITION_LETTERS[lang];
+  if (letters === undefined) return null;
+  return new RegExp("(^|[^\\p{L}\\d])([" + letters + letters.toUpperCase() +
+                    "])[ \\t]+(?=[\\p{L}\\d])", "gu");
+}
+/* Italian sinalefe and Spanish sinalefa: a word ending in a vowel and the next one
+   beginning with a vowel are sung on one note, so they are joined with a plus —
+   pi-sa+un, tut-to+il, mi+a-mor. Both languages count a silent h as no barrier
+   (l'ho+am-mo-scia-ta, la+ho-ra). Two things block the join: a stressed vowel on
+   either side, which is why this runs before the accents are stripped (costì anima,
+   sufrió horriblemente), and any punctuation between the words. Spanish also keeps
+   the hiatus when h is followed by ia ie ue ui, where the h is not silent at all
+   (y hierro, como hueso), and treats the word y as a vowel (abrigo y+nada). */
+const SUNG_VOWELS = "aeiouAEIOU";
+const STRESSED_VOWELS = "\u00E0\u00E1\u00E2\u00E4\u00E8\u00E9\u00EA\u00EB\u00EC\u00ED\u00EE\u00EF" +
+                        "\u00F2\u00F3\u00F4\u00F6\u00F9\u00FA\u00FB\u00FC" +
+                        "\u00C0\u00C1\u00C8\u00C9\u00CC\u00CD\u00D2\u00D3\u00D9\u00DA";
+const WORD_GAP_RE = /(\p{L})[ \t]+(?=(\p{L}+))/gu;
+const SPANISH_H_HIATUS = /^[hH](ia|ie|ue|ui)/;
+
+/* Spanish marks a hiatus with the accent itself: an i or u that carries one does
+   not form a diphthong with the vowel next to it — dí-a, frí-a, ve-í-as, pa-ís,
+   ba-úl. The accents are stripped a moment later, so the break has to be put in
+   while they are still there. */
+const SPANISH_VOWELS = "aeiou\u00E1\u00E9\u00F3AEIOU\u00C1\u00C9\u00D3";
+const ACCENTED_IU = "\u00ED\u00FA\u00CD\u00DA";
+const IU_THEN_VOWEL = new RegExp("([" + ACCENTED_IU + "])([" + SPANISH_VOWELS + "])", "g");
+const VOWEL_THEN_IU = new RegExp("([" + SPANISH_VOWELS + "])([" + ACCENTED_IU + "])", "g");
+
+function markSpanishHiatus(text, lang){
+  if (lang !== "es") return text;
+  return text.replace(IU_THEN_VOWEL, "$1-$2")
+             .replace(VOWEL_THEN_IU, (whole, vowel, iu, at, all) => {
+    /* the u of qu and gu is silent, so a-quí and se-guí keep their shape */
+    if ((vowel === "u" || vowel === "U") && at > 0 && "qgQG".includes(all[at - 1])) return whole;
+    return vowel + "-" + iu;
+  });
+}
+
+function joinSynalepha(text, lang){
+  if (lang !== "it" && lang !== "es") return text;
+  return text.replace(WORD_GAP_RE, (whole, last, next) => {
+    /* Italian keeps the two vowels apart when the first is stressed (dialefe);
+       Spanish sings them together even then: qué/hacer, está/aquí */
+    if (lang === "it" && STRESSED_VOWELS.includes(last)) return whole;
+    if (!SUNG_VOWELS.includes(last) && !STRESSED_VOWELS.includes(last)) return whole;
+    if (lang === "es" && (next === "y" || next === "Y")) return last + "+";
+    let head = next;
+    if (head[0] === "h" || head[0] === "H"){
+      if (lang === "es" && SPANISH_H_HIATUS.test(next)) return whole;
+      head = head.slice(1);
+    }
+    const first = head[0];
+    if (!first || STRESSED_VOWELS.includes(first) || !SUNG_VOWELS.includes(first)) return whole;
+    return last + "+";
+  });
+}
+
+/* French has no sinalefa — a hiatus between words is kept. What is sung joined is
+   the liaison: a silent final consonant of a short function word moves onto the
+   next word when that word starts with a vowel or a mute h (les+amis, en+hiver,
+   très+utile, ils+ont). The list is closed on purpose — liaison is obligatory after
+   determiners, pronouns, one-syllable prepositions and adverbs, and forbidden after
+   et and before an aspirate h (les héros, en haut), which H_ASPIRATE holds. */
+const FRENCH_LIAISON = new Set([
+  "les","des","aux","ces","mes","tes","ses","nos","vos","leurs","un","mon","ton","son",
+  "quelques","plusieurs","certains","quels","quelles","aucun","tout","tous","deux",
+  "trois","six","dix","nous","vous","ils","elles","on","en","dans","sans","sous","chez",
+  "tres","moins","trop","plus","bien","mieux","est","ont","sont","vont","font","grand",
+  "petit","petits","bon","premier","dernier","comment","quand"
+]);
+const H_ASPIRATE = ["heros","heroine","haricot","hibou","honte","honteux","haine","hall",
+  "halte","hamburger","handicap","hasard","haut","hauteur","hangar","harpe","hache",
+  "hockey","homard","hurler","huit","houle","hublot","hors","hanche","herisson","hamac",
+  "haie","hamster","hurlement"];
+const FRENCH_WORD_GAP_RE = /(\p{L}+)[ \t]+(?=(\p{L}+))/gu;
+const plain = s => s.normalize("NFD").replace(/\p{Mn}/gu, "").toLowerCase();
+
+function joinLiaison(text, lang){
+  if (lang !== "fr") return text;
+  return text.replace(FRENCH_WORD_GAP_RE, (whole, word, next) => {
+    if (!FRENCH_LIAISON.has(plain(word))) return whole;
+    const target = plain(next);
+    if (target[0] === "h"){
+      if (H_ASPIRATE.some(h => target.startsWith(h))) return whole;
+      return SUNG_VOWELS.includes(target[1] || "") ? word + "+" : whole;
+    }
+    return "aeiou".includes(target[0]) ? word + "+" : whole;
+  });
+}
+
+/* a hyphen with spaces on both sides goes, taking one space with it;
+   a hyphen between letters or digits becomes a space */
+const SPACED_HYPHEN_RE = /[ \t]+-[ \t]+/g;
+const INNER_HYPHEN_RE = /(?<=[\p{L}\d])-(?=[\p{L}\d])/gu;
+
+/* ================================================================== */
+/* 3. Languages                                                       */
+/* ================================================================== */
+
+/* Shared onsets: a stop plus a liquid stays whole (ta-ble, sur-prised);
+   s + stop does not (as-te-roid, Meis-ter, jesz-cze). */
+const BASE_ONSET2 = ["bl","br","cl","cr","dl","dr","fl","fr","gl","gr",
+                     "kl","kr","pl","pr","tl","tr","tw","vl","vr","zl"];
+const BASE_ONSET3 = ["str","spr","scr","spl","shr","thr","chr","phr","sch","ckl"];
+
+const LANGS = {
+  /* morphology  — the English -ed/-es/-ing/-ly/-gue/n't rules and the word tables
+     silentFinalE — is a final -e counted as a syllable
+     digraphs/onset2/onset3 — clusters that open the next syllable
+     closing     — clusters that close the syllable before them (ck, Korean ng)
+     remove      — shared onsets this language does not use
+     hiatus      — vowel pairs that are two syllables
+     allHiatus   — every vowel pair is two syllables, except those in noHiatus
+     yConsonant  — y before a vowel is always a consonant, never a nucleus */
+  en: { morphology:true, silentFinalE:true,
+        digraphs:["ch","sh","th","ph","wh","gh","qu"],   /* rh only opens a word: per-haps */
+        onset2:["sw"],
+        closing:["ck"],
+        hiatus:["io","iu","eo","uo","ya","yo","oe","ao"] },
+
+  es: { silentFinalE:false,
+        digraphs:["ch","ll","rr","qu","gu"],
+        remove:["str","spr","scr","spl","shr"],
+        hiatus:["ae","ao","ea","eo","oa","oe"] },
+
+  fr: { silentFinalE:true,
+        digraphs:["ch","ph","th","qu","gn"],
+        onset3:["chr","phr"],
+        hiatus:[] },
+
+  de: { silentFinalE:false,
+        digraphs:["ch","ph","th","qu","ck"],
+        onset2:["kn","zw","dw"],   /* pf only opens a word: Ap-fel, not A-pfel */
+        onset3:["sch","schr","chl","chr"],
+        hiatus:[] },
+
+  it: { silentFinalE:false,
+        digraphs:["ch","gh","gn","gl","sc","qu"],
+        onset2:["st","sp","sk","sf","sl","sm","sn","sv","sb","sd","sg"],
+        hiatus:["ae","ao","ea","eo","oa","oe"] },
+
+  id: { silentFinalE:false,
+        digraphs:["ng","ny","sy","kh"],
+        allHiatus:true, noHiatus:["ai","au","oi","ay","ey","iy","oy","uy"] },
+
+  tl: { silentFinalE:false,
+        digraphs:["ng","ts"],
+        allHiatus:true, noHiatus:["ay","ey","iy","oy","uy"] },
+
+  ko: { silentFinalE:false,
+        digraphs:["ch","ss","kk","tt","pp","jj"],
+        closing:["ng"],
+        hiatus:[] },
+
+  ja: { silentFinalE:false,
+        digraphs:["sh","ch","ts","ky","gy","ny","hy","by","py","my","ry","sy","j"],
+        yConsonant:true,
+        allHiatus:true, noHiatus:["ay","ey","iy","oy","uy"] },
+
+  ru: { silentFinalE:false,
+        digraphs:["zh","kh","ts","ch","sh","sc"],
+        onset2:["st","sp","sk","sl","sm","sn","sv","sw","zd","zn","zv","zb",
+                "tv","dv","kv","gn","kn","mn"],
+        onset3:["shc","str","zdr","vzg","stv"],
+        hiatus:["ia","io","iu","ie","eo","ea","oa"] },
+
+  uk: { silentFinalE:false,
+        digraphs:["zh","kh","ts","ch","sh","sc"],
+        onset2:["st","sp","sk","sl","sm","sn","sv","sw","zd","zn","zv","zb",
+                "tv","dv","kv","gn","kn","mn","dz"],
+        onset3:["shc","str","zdr","stv"],
+        hiatus:["ia","io","iu","ie","eo","ea","oa"] },
+
+  pl: { silentFinalE:false,
+        digraphs:["cz","sz","rz","dz","ch","zi","si","ci"],
+        onset2:["st","sp","sk","sc","sl","sm","sn","sw","zd","zg","zb","zn","zl",
+                "kw","tw","dw","gn","kn","mn","wn"],
+        onset3:["prz","trz","brz","krz","grz","drz","szc","str","chl","chr"],
+        hiatus:[] }
+};
+
+let CFG = null;
+
+function useLanguage(code){
+  const lang = LANGS[code] || LANGS.en;
+  const drop = new Set(lang.remove || []);
+  const keep = list => list.filter(c => !drop.has(c));
+  CFG = {
+    morphology: !!lang.morphology,
+    silentFinalE: !!lang.silentFinalE,
+    yConsonant: !!lang.yConsonant,
+    allHiatus: !!lang.allHiatus,
+    digraphs: new Set(keep(lang.digraphs || [])),
+    onset2: new Set(keep([...BASE_ONSET2, ...(lang.onset2 || [])])),
+    onset3: new Set(keep([...BASE_ONSET3, ...(lang.onset3 || [])])),
+    closing: new Set(lang.closing || []),
+    hiatus: new Set(lang.hiatus || []),
+    noHiatus: new Set(lang.noHiatus || [])
+  };
+}
+useLanguage("en");
+
+/* ================================================================== */
+/* 4. Syllables                                                       */
+/* ================================================================== */
+
+const VOWELS = new Set("aeiouy");
+const PLAIN_VOWELS = new Set("aeiou");
+const LE_CONSONANTS = new Set("bcdfgkptvz");   /* ta-ble, lit-tle, nee-dle, sha-ckles */
+/* which consonants let u start a syllable of its own before the next vowel */
+const GLIDE_HIATUS = { ua:"tdns", ue:"dl", ui:"n" };
+const HIATUS_BLOCKERS = new Set("tcsxgnlh");   /* nation, special, mil-lion, o-pin-ion */
+const EO_BLOCKERS = new Set("g");              /* gor-geous, pi-geon, dun-geon */
+const SIBILANTS = ["ch","sh","s","x","z","c","g","j"];
+/* One-syllable roots that end in a single s or z and double it before a suffix,
+   against the ll/ss/ff/zz habit: gas-sing, quiz-zing, not gass-ing, quizz-ing. */
+const SUFFIX_DOUBLED = new Set(["gas","quiz","whiz","bus","fez"]);
+
+/* Roots that already end in a doubled dd tt nn gg rr bb, where the doubling is
+   not the suffix at work: add-ing, add-ed, odd-er, purr-ing. "putt" is left out
+   on purpose — put-ting is the reading that actually turns up in lyrics. */
+const ROOT_DOUBLED = new Set(["add","egg","ebb","odd","err","purr","inn","buzz"]);
+
+/* Words ending in -er where -er is not a suffix: no comparative, no doer of an
+   action, no tool that does it. They keep the ordinary syllable shape, so the
+   hyphen lands where the consonants say (wa-ter) instead of before the ending
+   (wat-er). Doubled consonants are not listed — let-ter and bet-ter come out
+   right either way. Add a word here in one line; -ers forms follow by themselves. */
+const ER_NOT_SUFFIX = new Set([
+  /* people and family */
+  "mother","father","brother","sister","daughter","other","another","prisoner",
+  /* nature and things */
+  "water","river","flower","power","tower","shower","weather","feather","leather","thunder",
+  "silver","timber","ember","amber","powder","fever","liver","shiver","quiver",
+  "spider","tiger","ginger","finger","shoulder","paper","poster","monster","cider",
+  /* time */
+  "ever","never","over","under","after","winter","september","october","november","december",
+  /* abstractions */
+  "number","member","remember","order","border","corner","center","centre","danger",
+  "hunger","anger","wonder","murder","tender","slender","sober","super","offer",
+  "cover","discover","hover","clever","either","neither","whether","together",
+  "gather","rather","wither","bother","hither","eager","meager","disaster",
+  /* verbs that are not doers */
+  "laughter","stranger","concern","discern","lantern","cistern","cavern","tavern",
+  "whisper","answer","enter","surrender","consider","deliver","wander","linger",
+  "minister","master","plaster","cluster","blister","glimmer","flicker","wither"
+]);
+
+/** Syllable nuclei as [start, end]. */
+function nuclei(word){
+  const w = word.toLowerCase();
+  const ing = CFG.morphology && w.endsWith("ing");
+  /* where an -er / -ers ending starts, so a y nucleus before it keeps its own
+     syllable: dry-er, fly-er, dy-er */
+  const erStart = !CFG.morphology ? -1
+                : w.endsWith("ers") ? w.length - 3
+                : w.endsWith("er") ? w.length - 2 : -1;
+
+  const isVowel = i => {
+    const ch = w[i];
+    /* u after q belongs to the consonant cluster: queen, quiet, requiem */
+    if (ch === "u" && i > 0 && w[i-1] === "q") return false;
+    /* y before a vowel is a consonant when it opens the word or follows a vowel:
+       you, yellow, vo-yeur, lo-yal, Ros-si-ya — but dy-ing, try-ing keep their y.
+       In romanized Japanese y is never a nucleus: kyo-u, ryo-ka-n */
+    if (ch === "y" && i + 1 < w.length && PLAIN_VOWELS.has(w[i+1]) &&
+        (CFG.yConsonant || i === 0 || PLAIN_VOWELS.has(w[i-1]))) return false;
+    return VOWELS.has(ch);
+  };
+
+  const groups = [];
+  let i = 0;
+  while (i < w.length){
+    if (isVowel(i)){
+      let j = i;
+      while (j + 1 < w.length && isVowel(j + 1)) j++;
+      let start = i;
+      for (let k = i; k < j; k++){
+        const pair = w[k] + w[k+1];
+        let split = CFG.allHiatus ? !CFG.noHiatus.has(pair) : CFG.hiatus.has(pair);
+        if (split && (pair === "ia" || pair === "io") && k > 0 && HIATUS_BLOCKERS.has(w[k-1])){
+          split = false;   /* nation, special, patient, mil-lion, fash-ion */
+        }
+        if (split && pair === "eo" && k > 0 && EO_BLOCKERS.has(w[k-1])){
+          split = false;   /* gor-geous, cou-ra-geous, pi-geon */
+        }
+        /* u before another vowel is a syllable of its own after some consonants and
+           not after others: ri-tu-al, ca-su-al, an-nu-al, flu-ent, du-el, ge-nu-ine,
+           but va-lua-ble, cruel, fuel, lan-guage, guest, queen */
+        const before = k > 0 ? w[k-1] : "";
+        if (!split && before && GLIDE_HIATUS[pair] && GLIDE_HIATUS[pair].includes(before)){
+          split = true;
+        }
+        /* -ing after a vowel is its own syllable: be-ing, see-ing, do-ing */
+        if (!split && ing && k + 1 === w.length - 3) split = true;
+        /* a y nucleus right before -er is a syllable of its own: dry-er, fly-er */
+        if (!split && erStart > 0 && k + 1 === erStart && pair === "ye") split = true;
+        if (split){ groups.push([start, k]); start = k + 1; }
+      }
+      groups.push([start, j]);
+      i = j + 1;
+    } else i++;
+  }
+
+  if (CFG.morphology && groups.length > 1){
+    /* final -gue is silent: league, vague, plague, tongue(s), fa-tigue */
+    const g = groups[groups.length - 1];
+    if (w.endsWith("gue") && g[0] === w.length - 2 && g[1] === w.length - 1) groups.pop();
+    else if (w.endsWith("gues") && g[0] === w.length - 3 && g[1] === w.length - 2) groups.pop();
+  }
+
+  if (groups.length > 1){
+    const [s, e] = groups[groups.length - 1];
+    const single = s === e;
+    const prev  = s > 0 ? w[s-1] : "";
+    const prev2 = s > 1 ? w[s-2] : "";
+    const keepsLe = (prev === "l" || prev === "r") && LE_CONSONANTS.has(prev2);
+    if (single && s === w.length - 1 && w[s] === "e"){
+      /* silent final -e: hope, loved; ta-ble and nee-dle keep theirs */
+      if (CFG.silentFinalE && !keepsLe) groups.pop();
+    } else if (CFG.morphology && single && s === w.length - 2 && w[s] === "e" && w[w.length-1] === "d"){
+      /* past-tense -ed is silent except after d or t: pushed vs want-ed;
+         drib-bled and baf-fled keep their syllable like nee-dle does */
+      if (prev !== "t" && prev !== "d" && !keepsLe) groups.pop();
+    } else if (CFG.morphology && single && s === w.length - 2 && w[s] === "e" && w[w.length-1] === "s"){
+      /* plural -es is silent except after a sibilant: genes vs fa-ces;
+         nee-dles and sha-ckles keep their syllable */
+      const stem = w.slice(0, -2);
+      if (!keepsLe && !SIBILANTS.some(suf => stem.endsWith(suf))) groups.pop();
+    }
+  }
+  return groups;
+}
+
+function countSyllables(word){
+  const w = word.toLowerCase();
+  if (![...w].some(c => VOWELS.has(c))) return 0;
+  return Math.max(nuclei(w).length, 1);
+}
+
+/** Candidate hyphen positions inside a bare word. */
+function syllablePositions(word){
+  const w = word.toLowerCase();
+  const nu = nuclei(w);
+  if (nu.length < 2) return [];
+  const pts = [];
+  for (let idx = 0; idx < nu.length - 1; idx++){
+    const end1 = nu[idx][1], start2 = nu[idx+1][0];
+    const cluster = w.slice(end1 + 1, start2);
+    const n = cluster.length;
+    let cut;
+    if (n === 0) cut = start2;
+    else if (n === 1) cut = start2 - 1;                        /* V-CV: ti-ger */
+    else {
+      let onset;
+      if (n >= 3 && CFG.onset3.has(cluster.slice(-3))) onset = 3;
+      else if ([...CFG.closing].some(c => cluster.endsWith(c))) onset = 0;  /* pock-et, sa-rang-hae */
+      else if (CFG.digraphs.has(cluster.slice(-2)) || CFG.onset2.has(cluster.slice(-2))) onset = 2;
+      else onset = 1;
+      cut = start2 - onset;
+    }
+    pts.push(cut);
+  }
+
+  if (CFG.morphology){
+    const last = nu[nu.length - 1];
+    const suffixE = last[0] === last[1] && last[0] === w.length - 2 && w[last[0]] === "e";
+    if (suffixE && w[w.length-1] === "d"){
+      /* a kept -ed breaks right before it: want-ed, need-ed, vi-sit-ed */
+      let cut = w.length - 2;
+      /* unless a doubled consonant splits between the two: pad-ded, bat-ted */
+      if (w.length >= 4 && w[w.length-3] === w[w.length-4] && !VOWELS.has(w[w.length-3])) cut = w.length - 3;
+      /* but a root that owns its double keeps it: add-ed, odd-ed */
+      if (ROOT_DOUBLED.has(w.slice(0, w.length - 2))) cut = w.length - 2;
+      /* and unless the syllable before it is a bare vowel: punc-tu-a-ted, not punc-tu-at-ed */
+      const before = nu[nu.length - 2];
+      const bareVowel = before[0] === before[1] && before[0] > 0 && VOWELS.has(w[before[0] - 1]);
+      /* and unless a Cle cluster owns the break: drib-bled, han-dled */
+      const le = (w[w.length-3] === "l" || w[w.length-3] === "r") && LE_CONSONANTS.has(w[w.length-4]);
+      if (!bareVowel && !le) pts[pts.length - 1] = cut;
+    } else if (suffixE && w[w.length-1] === "s"){
+      /* -es sticks to a stem that already ends in a sibilant: box-es, wish-es, kiss-es */
+      const c = w[w.length-3], pair = w.slice(-4, -2);
+      if (c === "x" || pair === "ch" || pair === "sh" || (w.length >= 4 && c === w[w.length-4])){
+        pts[pts.length - 1] = w.length - 2;
+      }
+    } else if (/(?:ings?|erns?|ions?|ers?)$/.test(w)){
+      /* -ing, -ern and -er keep the root whole: look-ing, cold-er, north-ern,
+         sing-er. A doubled consonant splits between the two: get-ting, mil-lion.
+         A Cle cluster takes its own piece: strug-gl-ing, fid-dl-ing, daz-zl-ing.
+         -ion closes the syllable before it (o-pin-ion, cush-ion) unless a g
+         opens it (re-gion, re-li-gion). ER_NOT_SUFFIX opts a word out. */
+      const suffix = w.endsWith("ings") ? 4 : w.endsWith("ing") ? 3
+                   : w.endsWith("erns") ? 4 : w.endsWith("ern") ? 3
+                   : w.endsWith("ions") ? 4 : w.endsWith("ion") ? 3
+                   : w.endsWith("ers") ? 3 : 2;
+      const kind = w.endsWith("ing") || w.endsWith("ings") ? "ing"
+                 : w.endsWith("ern") || w.endsWith("erns") ? "ern"
+                 : w.endsWith("ion") || w.endsWith("ions") ? "ion" : "er";
+      const start = w.length - suffix;
+      let s = start;
+      /* y counts as a consonant here, so play-er and play-ing keep their root */
+      while (s > 0 && !PLAIN_VOWELS.has(w[s-1])) s--;
+      const cluster = w.slice(s, start);
+      const bare = (kind === "er" && w.endsWith("ers")) || (kind === "ern" && w.endsWith("erns"))
+                 ? w.slice(0, -1) : w;
+      const listed = (kind === "er" || kind === "ern") && ER_NOT_SUFFIX.has(bare);
+
+      if (cluster.length && start >= 2 && !listed){
+        const twin = cluster.length >= 2 && cluster[cluster.length-1] === cluster[cluster.length-2];
+        const previous = pts.length > 1 ? pts[pts.length-2] : 0;
+        /* a Cle cluster becomes a piece of its own before -ing: strug-gl-ing */
+        const le = cluster.length >= 2 && cluster[cluster.length-1] === "l" &&
+                   LE_CONSONANTS.has(cluster[cluster.length-2]);
+        if (kind === "ing" && le){
+          const onset = CFG.onset3.has(cluster.slice(-3)) ? 3 : 2;
+          const first = start - onset;
+          if (first > previous){ pts[pts.length-1] = first; pts.push(start); }
+        } else if (kind === "ion" && "tscg".includes(w[start-1])){
+          /* t s c g carry the sound into the last syllable and open it:
+             na-tion, con-fu-sion, sus-pi-cion, re-gion, re-li-gion */
+        } else {
+          /* ll ss ff zz belong to a one-syllable root, so the root stays whole:
+             fall-ing, pass-ing, buzz-ing, stuff-ing, tall-er, kill-er. Doubling
+             added by the suffix itself splits between the two: get-ting, run-ning,
+             and so does l doubled in a longer root: con-trol-ling, tra-vel-ling. */
+          const stem = w.slice(0, start);
+          const oneSyllable = (stem.match(/[aeiouy]+/g) || []).length === 1;
+          let rootTwin = twin && "lsfz".includes(cluster[cluster.length-1]) && oneSyllable;
+          if (rootTwin && SUFFIX_DOUBLED.has(stem.slice(0, -1))) rootTwin = false;
+          if (twin && ROOT_DOUBLED.has(stem)) rootTwin = true;
+          if (kind === "ion") rootTwin = false;        /* mil-lion, pas-sion */
+          const cut = (twin && !rootTwin) ? start - 1 : start;
+          if (cut > previous && cut <= w.length - 1) pts[pts.length-1] = cut;
+        }
+      }
+    } else if (w.endsWith("ly") && w.length > 3 && !VOWELS.has(w[w.length-3]) && w[w.length-3] !== "p"){
+      /* -ly is its own syllable: sad-ly, quick-ly (but sim-ply, re-ply) */
+      pts[pts.length - 1] = w.length - 2;
+    }
+  }
+  return pts;
+}
+
+/* Words the rules get wrong. Patterns are written out in full; -s/-es/-ly/-ness/-ing/
+   -ed/-d/-r forms are derived automatically. English only. */
+const WORD_EXCEPTIONS = {
+  /* -ed pronounced as its own syllable */
+  naked:"nak-ed", wicked:"wick-ed", wretched:"wretch-ed", ragged:"rag-ged",
+  rugged:"rug-ged", jagged:"jag-ged", crooked:"crook-ed", beloved:"be-lov-ed",
+  /* -ed as part of the root */
+  hundred:"hund-red", hatred:"hat-red", sacred:"sac-red", kindred:"kind-red",
+  embed:"em-bed",
+  /* vowel pairs the general rules cannot tell apart */
+  people:"peo-ple", every:"eve-ry", realize:"re-a-lize", realise:"re-a-lise",
+  reality:"re-a-li-ty", realities:"re-a-li-ties",
+  realizing:"re-a-liz-ing", realising:"re-a-lis-ing",
+  audience:"au-di-ence", science:"sci-ence", scientist:"sci-en-tist",
+  client:"cli-ent", quiet:"qui-et", diet:"di-et", giant:"gi-ant",
+  area:"a-re-a", idea:"i-de-a", ideal:"i-de-al", create:"cre-ate",
+  creation:"cre-a-tion", creative:"cre-a-tive", created:"cre-a-ted",
+  creating:"cre-a-ting",
+  paranoia:"pa-ra-no-ia", paranoid:"pa-ra-no-id", stoic:"sto-ic", heroic:"he-ro-ic",
+  trial:"tri-al", dial:"di-al", denial:"de-ni-al", requiem:"re-qui-em",
+  transient:"tran-si-ent", transience:"tran-si-ence", ole:"o-le",
+  /* diphthongs that are really two syllables */
+  hour:"ho-ur", sour:"so-ur", flour:"flo-ur",
+  dialogue:"di-a-logue", monologue:"mo-no-logue", catalogue:"ca-ta-logue",
+  argue:"ar-gue", colleague:"col-lea-gue", aches:"aches", mercedes:"mer-ce-des",
+  /* stress the rules cannot hear */
+  basically:"ba-sical-ly", favourite:"favou-rite", favorite:"favo-rite",
+  different:"diffe-rent", difference:"diffe-rence", listening:"listen-ing",
+  /* abbreviations spelled out letter by letter */
+  mr:"m-r", mrs:"m-rs",
+  /* a syllable the singer swallows: the spelling has one more than the song */
+  chocolate:"choco-late", camera:"camer-a", family:"fami-ly",
+  interesting:"inte-rest-ing", wandering:"wander-ing", wondering:"wonder-ing",
+  temperature:"tempe-ra-ture",
+  literature:"lite-ra-ture", business:"busi-ness", evening:"eve-ning",
+  several:"seve-ral", average:"ave-rage", desperate:"despe-rate",
+  separate:"sepa-rate", medicine:"medi-cine", laboratory:"labo-ra-to-ry",
+  secretary:"sec-re-ta-ry", natural:"natu-ral", actually:"ac-tual-ly",
+  probably:"prob-ab-ly", aspirin:"aspi-rin", bachelor:"bache-lor",
+  boundary:"bounda-ry", finally:"final-ly", generally:"gene-ral-ly",
+  opera:"ope-ra",
+  /* non- is not a prefix in the program: it would spoil none-the-less */
+  nonstop:"non-stop",
+  /* a word the letters would split but the voice does not */
+  eye:"eye",
+  /* spellings that do not follow from the letters */
+  silhouette:"sil-hou-ette", restaurant:"restau-rant", wednesday:"wednes-day",
+  february:"feb-ru-a-ry", january:"ja-nu-a-ry",
+  jewellery:"jew-elle-ry", jewelry:"jewel-ry",
+  /* -ion words that keep the i as a syllable of its own */
+  lion:"li-on", minion:"mi-nion", union:"u-ni-on", reunion:"re-u-ni-on",
+  communion:"com-mu-ni-on", champion:"cham-pi-on", oblivion:"ob-liv-i-on",
+  scallion:"scal-li-on", criterion:"cri-te-ri-on", centurion:"cen-tu-ri-on",
+  scorpion:"scor-pi-on", dandelion:"dan-de-li-on",
+  museum:"mu-se-um", persuade:"per-suade", cooperate:"co-o-pe-rate",
+  /* an apostrophe word whose division is not derivable: o'clock is "of the clock" */
+  "o'clock":"o'-clock",
+  /* the 've of could've is a syllable of its own: could-'ve, not coul-d've */
+  "could've":"could-'ve", "should've":"should-'ve", "would've":"would-'ve",
+  "might've":"might-'ve", "must've":"must-'ve"
+};
+
+/* Compounds: every part is hyphenated on its own, then joined. English only. */
+const COMPOUNDS = {
+  anything:["any","thing"], something:["some","thing"], everything:["every","thing"],
+  nothing:["no","thing"], anybody:["any","body"], somebody:["some","body"],
+  everybody:["every","body"], nobody:["no","body"], anyone:["any","one"],
+  someone:["some","one"], everyone:["every","one"], everyday:["every","day"],
+  anywhere:["any","where"], somewhere:["some","where"], everywhere:["every","where"],
+  nowhere:["no","where"], anyway:["any","way"], anytime:["any","time"],
+  sometime:["some","time"], sometimes:["some","times"],
+  myself:["my","self"], yourself:["your","self"], himself:["him","self"],
+  herself:["her","self"], itself:["it","self"], oneself:["one","self"],
+  themselves:["them","selves"], ourselves:["our","selves"],
+  without:["with","out"], within:["with","in"], inside:["in","side"],
+  outside:["out","side"], upon:["up","on"], into:["in","to"], onto:["on","to"],
+  oversea:["over","sea"], overnight:["over","night"], whatever:["what","ever"],
+  whenever:["when","ever"], wherever:["where","ever"], however:["how","ever"],
+  forever:["for","ever"], moreover:["more","over"], tonight:["to","night"],
+  today:["to","day"], inadvertent:["in","advertent"], maybe:["may","be"],
+  sideswipe:["side","swipe"], sidewalk:["side","walk"], sidestep:["side","step"],
+  seaside:["sea","side"], lifetime:["life","time"], barefoot:["bare","foot"],
+  thunderstorm:["thunder","storm"], lighthouse:["light","house"],
+  wristwatch:["wrist","watch"], upstairs:["up","stairs"],
+  forehead:["fore","head"], vineyard:["vine","yard"],
+  nevertheless:["never","the","less"], nonetheless:["none","the","less"],
+  someday:["some","day"], hedgerow:["hedge","row"]
+};
+
+/* Clusters an English word can start with, used to tell a real seam from a false
+   one: some-how and su-per-star yes, so-mer-sault no. */
+const WORD_ONSETS = new Set(["bl","br","ch","cl","cr","dr","dw","fl","fr","gl","gr",
+  "gn","kl","kn","pl","pr","ph","qu","sc","sh","sk","sl","sm","sn","sp","sq","st",
+  "sw","th","tr","tw","wh","wr"]);
+
+/* One-syllable words that pair up into compounds: land+lord, sun+light, heart+break.
+   A word is split only when BOTH halves are on this list, which is what keeps season,
+   legend, husband and climate out of it. Each half must be at least three letters.
+   Add a word here and every compound it forms starts working at once. */
+const COMPOUND_PARTS = new Set([
+  "ache","air","back","bag","ball","band","bath","bed","bell","bird","birth","black",
+  "blood","box","brow",
+  "blue","boat","bone","book","boy","break","bridge","bright","broad","cake","camp",
+  "cup","dish","lake","lash","lid","log","mud","nail","net","pin","pot","rat","rib",
+  "tank","toe","web","zone",
+  "car","case","cash","chair","chalk","cheek","chest","child","church","class","cloud",
+  "coast","cold","corn","court","cross","crown","dance","dark","day","dead","deep","desk","dog",
+  "door","down","dream","dress","drive","drop","drum","dust","ear","earth","east","end",
+  "eye","face","fall","farm","fast","fear","field","fire","fish","flag","flight","floor",
+  "foot","free","friend","front","frost","game","gate","ghost","girl","glass","gold",
+  "gown","grass","grave","green","ground","gun","hair","half","hall","hand","hard","head",
+  "heart","high","hill","hold","hole","home","hope","horse","house","key","kick","king",
+  "knee","lace","land","lane","law","leaf","life","light","line","lip","lock","long",
+  "lord","love","lunch","mail","main","man","map","mare","mark","mask","match","mate",
+  "mid","milk","mind","moon","mouth","name","neck","news","night","noon","north","note",
+  "oil","out","pack","page","pain","paint","path","phone","pipe","place","plane","play",
+  "point","port","post","print","race","rail","rain","red","ring","road","rock","roof",
+  "room","root","rope","rose","sail","salt","sand","school","sea","seat","shade","shake",
+  "sheep","shelf","ship","shirt","shoe","shop","shore","short","shot","side","sight",
+  "sign","silk","sky","sleep","slow","smoke","snake","snow","song","soul","sound","south",
+  "space","spring","star","step","stick","stone","stop","store","storm","stream","street",
+  "strong","sun","sweet","tail","tale","team","tear","thorn","throat","thumb","tide",
+  "time","tomb","tooth","top","town","track","train","tree","truck","wall","war","ward",
+  "ware","wash","watch","wave","way","wear","week","west","wheat","wheel","white","wife",
+  "wild","wind","wine","wing","wish","wolf","wood","word","work","world","worm","yard",
+  "year","young","youth"
+]);
+
+/* First elements that can start any word: mo-ther-land, su-per-star */
+const COMPOUND_PREFIXES = ["mother","brother","father","super","half","some","over",
+                           "under","out","up","self"];
+
+/* suffixes that always start a syllable of their own: home-less, dark-ness, move-ment */
+const SUFFIX_SPLITS = ["less","ness","ment","ful","some","ly"];
+/* endings pronounced as a syllable without a vowel: pri-sm, rhy-thm, sar-ca-sm */
+const SYLLABIC_ENDINGS = ["thm","sm"];
+
+const DERIVED_SUFFIXES = [["ness","-"],["ing","-"],["ly","-"],
+                          ["es",""],["ed",""],["d",""],["s",""],["r",""]];
+
+/** Finds word (or its -s/-ly/-ing/... form) in a table. Returns [value, tail, joiner]. */
+function lookup(table, word){
+  const lower = word.toLowerCase();
+  if (table[lower] !== undefined) return [table[lower], "", ""];
+  for (const [suffix, joiner] of DERIVED_SUFFIXES){
+    const stem = lower.slice(0, -suffix.length);
+    if (lower.endsWith(suffix) && table[stem] !== undefined){
+      return [table[stem], word.slice(stem.length), joiner];
+    }
+  }
+  return [null, "", ""];
+}
+
+function exceptionHyphenation(word){
+  const [pattern, tail, joiner] = lookup(WORD_EXCEPTIONS, word);
+  if (pattern === null) return null;
+  const cuts = [];
+  let letters = 0;
+  for (const ch of pattern){ if (ch === "-") cuts.push(letters); else letters++; }
+  const stem = word.slice(0, word.length - tail.length);
+  if (letters !== stem.length) return null;
+  let out = "", prev = 0;
+  for (const cut of cuts){ out += stem.slice(prev, cut) + "-"; prev = cut; }
+  out += stem.slice(prev);
+  return tail ? out + joiner + tail : out;
+}
+
+function compoundHyphenation(word, left, right){
+  const [parts, tail, joiner] = lookup(COMPOUNDS, word);
+  if (parts === null) return null;
+  const stem = word.slice(0, word.length - tail.length);
+  const pieces = [];
+  let pos = 0;
+  for (const part of parts){
+    const chunk = stem.slice(pos, pos + part.length);
+    if (chunk.toLowerCase() !== part) return null;
+    pieces.push(hyphenateWord(chunk, left, right));
+    pos += part.length;
+  }
+  if (pos !== stem.length) return null;
+  const out = pieces.join("-");
+  return tail ? out + joiner + tail : out;
+}
+
+function prefixHyphenation(word, left, right){
+  const lower = word.toLowerCase();
+  for (const prefix of COMPOUND_PREFIXES){
+    if (!lower.startsWith(prefix)) continue;
+    const rest = word.slice(prefix.length);
+    if (rest.length < 2 || ![...rest.toLowerCase()].some(c => VOWELS.has(c))) continue;
+    /* the remainder has to be able to start a word: some-how yes, some-rsault no */
+    const head = rest.toLowerCase().slice(0, 2);
+    if (!PLAIN_VOWELS.has(head[0]) && !PLAIN_VOWELS.has(head[1]) &&
+        !WORD_ONSETS.has(head)) continue;
+    return hyphenateWord(word.slice(0, prefix.length), left, right) + "-" +
+           hyphenateWord(rest, left, right);
+  }
+  return null;
+}
+
+/** Is this a compound half, on its own or in an -s/-ed/-ing/... form? */
+function isCompoundPart(piece){
+  if (COMPOUND_PARTS.has(piece)) return true;
+  for (const [suffix] of DERIVED_SUFFIXES){
+    if (piece.endsWith(suffix) && COMPOUND_PARTS.has(piece.slice(0, -suffix.length))) return true;
+  }
+  return false;
+}
+
+/** land-lord, sun-light, heart-break: two one-syllable words written as one. */
+function partsHyphenation(word, left, right){
+  const lower = word.toLowerCase();
+  if (lower.length < 6) return null;
+  for (let cut = 3; cut <= lower.length - 3; cut++){
+    if (COMPOUND_PARTS.has(lower.slice(0, cut)) && isCompoundPart(lower.slice(cut))){
+      return hyphenateWord(word.slice(0, cut), left, right) + "-" +
+             hyphenateWord(word.slice(cut), left, right);
+    }
+  }
+  return null;
+}
+
+const LATIN_ONLY = /^[A-Za-z]+$/;
+const INITIALISM = /^[B-DF-HJ-NP-TV-XZ]{2,4}$/;   /* all caps, no vowel: MC, DJ, TV */
+
+/* Initialisms that carry a vowel, so the rule above cannot see them. Only ones
+   that are read out letter by letter belong here: NASA, AIDS and NATO are said as
+   words and must stay whole. Forms that are also ordinary words (US, WHO, IT, AM,
+   PM, OK, NO, SO, BET, PIN, POW) are left out on purpose — in a line set in
+   capitals they would fall apart. Plurals follow by themselves: CDs -> C-Ds. */
+const INITIALISMS = new Set([
+  /* countries and bodies */
+  "USA","UK","UN","EU","UAE","USSR","NYC","NY","LA","DC","ATL","SF","LDN",
+  /* agencies */
+  "FBI","CIA","DEA","ATF","IRS","DMV","NSA","CDC","FDA","TSA","NYPD","LAPD","DHS",
+  /* networks and media */
+  "BBC","CNN","MTV","HBO","ESPN","NBC","ABC","CBS","TMZ",
+  /* sport */
+  "NBA","NFL","MLB","NHL","UFC","WWE","MVP","NCAA","KO","TKO",
+  /* things and tech */
+  "CD","DVD","LP","EP","PC","GPS","USB","ATM","DNA","RNA","UFO","IQ","AI","VR",
+  "LED","SMS","SUV","RV","BMW","AMG","GTA","AC","DC","XL","XXL","ID",
+  /* people and titles */
+  "CEO","CFO","CTO","MBA","VIP","OG","DJ","MC",
+  /* talk */
+  "OMG","WTF","LOL","IDK","TBH","FYI","BTW","IRL","BRB","IMO","TMI","POV","AKA",
+  "RIP","SOS","XO","BS","NDA","IOU","MIA","PTSD","DUI","DWI","ICU","ETA",
+  /* substances and health */
+  "LSD","THC","CBD","MDMA","PCP","HIV","STD","BPM","AK"
+]);
+
+/** Splits a known initialism into letters, keeping a plural s: C-D, D-Js. */
+function initialismHyphenation(word){
+  if (INITIALISMS.has(word)) return [...word].join("-");
+  if (word.endsWith("s") && INITIALISMS.has(word.slice(0, -1))){
+    return [...word.slice(0, -1)].join("-") + "s";
+  }
+  return null;
+}
+
+/** Hyphenates one bare word. Letters are never changed, dropped or reordered. */
+function hyphenateWord(word, left, right){
+  if (!LATIN_ONLY.test(word)) return word;
+
+  if (CFG.morphology){
+    const spelled = initialismHyphenation(word);   /* U-K, F-B-I, C-N-N */
+    if (spelled !== null) return spelled;
+    if (INITIALISM.test(word) &&
+        ![...word].some((ch, i) => i > 0 && ch === word[i-1])){
+      return [...word].join("-");                  /* MC -> M-C */
+    }
+  }
+
+  if (word.length < left + right) return word;
+
+  if (CFG.morphology){
+    const listed = exceptionHyphenation(word);
+    if (listed !== null) return listed.replace(/-/g, "") === word ? listed : word;
+    const joined = compoundHyphenation(word, left, right);
+    if (joined !== null) return joined.replace(/-/g, "") === word ? joined : word;
+    const prefixed = prefixHyphenation(word, left, right);
+    if (prefixed !== null) return prefixed.replace(/-/g, "") === word ? prefixed : word;
+    const paired = partsHyphenation(word, left, right);
+    if (paired !== null) return paired.replace(/-/g, "") === word ? paired : word;
+
+    for (const ending of SYLLABIC_ENDINGS){
+      if (word.length >= ending.length + 2 && word.toLowerCase().endsWith(ending)){
+        const stem = word.slice(0, word.length - ending.length);
+        if ([...stem.toLowerCase()].some(c => VOWELS.has(c))){
+          return hyphenateWord(stem, left, right) + "-" + word.slice(stem.length);
+        }
+      }
+    }
+
+    for (const suffix of SUFFIX_SPLITS){
+      /* -ply is part of the root, not an adverb ending: re-ply, sim-ply, sup-ply */
+      if (suffix === "ly" && word.toLowerCase().endsWith("ply")) continue;
+      if (word.length > suffix.length + 2 && word.toLowerCase().endsWith(suffix)){
+        const stem = word.slice(0, word.length - suffix.length);
+        if ([...stem.toLowerCase()].some(c => VOWELS.has(c))){
+          return hyphenateWord(stem, left, right) + "-" + word.slice(stem.length);
+        }
+      }
+    }
+  }
+
+  if (countSyllables(word) < 2) return word;
+  const pts = [...new Set(syllablePositions(word))]
+                .filter(p => p >= left && p <= word.length - right)
+                .sort((a,b) => a-b);
+  if (!pts.length) return word;
+  const pieces = [];
+  let prev = 0;
+  for (const p of pts){ pieces.push(word.slice(prev, p)); prev = p; }
+  pieces.push(word.slice(prev));
+  const result = pieces.join("-");
+  if (result.replace(/-/g, "") !== word || pieces.some(s => s === "")) return word;
+  return result;
+}
+
+/* rock'n'roll -> rock-'n'-roll: a single letter fenced by apostrophes is its own piece */
+const TIED_LETTER_RE = /(\p{L})(['\u2019])(\p{L})(['\u2019])(\p{L})/gu;
+/* O'Neill -> O'-Neill: after the apostrophe a new capital starts a new piece,
+   but not inside a word set entirely in capitals (I'M, THEY'RE stay whole) */
+const APOSTROPHE_NAME_RE = /(['\u2019])(?=\p{Lu}\p{L})/gu;
+
+function markApostrophes(token){
+  let out = token.replace(TIED_LETTER_RE, "$1-$2$3$4-$5");
+  if (out !== out.toUpperCase()) out = out.replace(APOSTROPHE_NAME_RE, "$1-");
+  return out;
+}
+
+/* Sung elisions. The elided spelling is one syllable short of the full word, and
+   that is the whole point of writing it that way, so each entry carries its own
+   division: mem'ry is sung in two, memory in three. The full spelling is what the
+   letters become; the hyphens are where the singer breaks.
+   This is the only place where letters change — a fixed list, never a guess.
+   Contractions are not elisions: don't, y'all, it's, I'm are left alone. */
+const ELISIONS = {
+  "ev'ry":"eve-ry", "ev'rything":"eve-ry-thing", "ev'rybody":"eve-ry-bo-dy",
+  "ev'ryone":"eve-ry-one", "ev'ryday":"eve-ry-day", "ev'rywhere":"eve-ry-where",
+  "diff'rent":"diffe-rent", "diff'rence":"diffe-rence",
+  "mem'ry":"memo-ry", "mem'ries":"memo-ries",
+  "sev'ral":"seve-ral", "gen'ral":"gene-ral",
+  "pow'r":"po-wer", "pow'rs":"po-wers", "flow'r":"flo-wer", "flow'rs":"flo-wers",
+  "heav'n":"hea-ven", "heav'ns":"hea-vens", "heav'nly":"hea-ven-ly",
+  "ne'er":"ne-ver", "o'er":"o-ver", "e'er":"e-ver"
+};
+
+/** Rewrites a sung elision to its full spelling, already divided. */
+function elisionHyphenation(token){
+  const pattern = ELISIONS[token.toLowerCase().replace(/\u2019/g, "'")];
+  if (pattern === undefined) return null;
+  if (token === token.toUpperCase()) return pattern.toUpperCase();
+  if (token[0] === token[0].toUpperCase()) return pattern[0].toUpperCase() + pattern.slice(1);
+  return pattern;
+}
+
+const NT_RE = /^(\p{L}{2,})n['\u2019]t$/iu;
+const IN_RE = /^(\p{L}{2,})in['\u2019]$/iu;
+const TOKEN_RE = /\p{L}+(?:['\u2019]\p{L}+)*['\u2019]?/gu;
+
+/** Hyphenates a word that may carry apostrophes: isn't, do-in', everybody's. */
+function hyphenateToken(token, left, right){
+  let result;
+  if (CFG.morphology){
+    /* an elision is rewritten whole, so the check below does not apply to it */
+    const elided = elisionHyphenation(token);
+    if (elided !== null) return elided;
+  }
+  if (CFG.morphology && /['\u2019]/.test(token)){
+    /* apostrophe words listed in WORD_EXCEPTIONS, e.g. o'clock -> o'-clock */
+    const listed = exceptionHyphenation(token.replace(/\u2019/g, "'"));
+    if (listed !== null && listed.replace(/-/g, "") === token.replace(/\u2019/g, "'")){
+      return token.includes("\u2019") ? listed.replace(/'/g, "\u2019") : listed;
+    }
+  }
+  let m = CFG.morphology ? token.match(NT_RE) : null;
+  if (m){
+    /* n't is a syllable after a consonant (is-n't, have-n't) but not after a
+       vowel or an r sound (aren't, don't, can't, weren't) */
+    const base = m[1];
+    let sound = base.toLowerCase();
+    if (sound.endsWith("e") && sound.length > 2) sound = sound.slice(0, -1);   /* have -> hav */
+    const last = sound[sound.length - 1];
+    const joiner = (VOWELS.has(last) || last === "r") ? "" : "-";
+    result = hyphenateWord(base, left, right) + joiner + token.slice(base.length);
+  } else if (CFG.morphology && (m = token.match(IN_RE))){
+    /* dropped-g gerund: the -ing form is hyphenated and its g swapped for the
+       apostrophe, so every -ing rule carries over: look-in', get-tin', listen-in' */
+    const gerund = hyphenateWord(m[1] + "ing", left, right);
+    result = gerund.endsWith("ing")
+      ? gerund.slice(0, -1) + token.slice(token.length - 1)
+      : hyphenateWord(m[1], left, right) + "-" + token.slice(m[1].length);
+  } else {
+    result = markApostrophes(token).replace(/\p{L}+/gu, w => hyphenateWord(w, left, right));
+  }
+  return result.replace(/-/g, "") === token ? result : token;
+}
+
+function hyphenateText(text, left, right){
+  let hyphens = 0;
+  const out = text.replace(TOKEN_RE, m => {
+    const r = hyphenateToken(m, left, right);
+    hyphens += r.length - m.length;
+    return r;
+  });
+  return [out, hyphens];
+}
+
+/* ================================================================== */
+/* 5. Full pipeline                                                   */
+/* ================================================================== */
+
+function processText(text, opt){
+  let out = text, chars = 0, dia = 0, hyphens = 0, markers = 0, recommended = 0;
+
+  [out, recommended] = stripRecommendations(out);
+  [out, markers] = stripMarkers(out, opt.tags, opt.round, opt.numbering);
+  markers += recommended;
+  [out, chars] = mapChars(out);
+  const prepositions = prepositionRe(opt.lang);
+  if (prepositions) out = out.replace(prepositions, "$1$2+");
+  if (opt.hyphens) out = out.replace(SPACED_HYPHEN_RE, " ").replace(INNER_HYPHEN_RE, " ");
+  /* before the accents are stripped: a stressed vowel blocks the join */
+  out = joinSynalepha(out, opt.lang);
+  out = markSpanishHiatus(out, opt.lang);
+  out = joinLiaison(out, opt.lang);
+  if (opt.lang === "de"){
+    let spelled = 0;
+    [out, spelled] = expandUmlauts(out);
+    dia += spelled;
+  }
+  let stripped = 0;
+  [out, stripped] = stripDiacritics(out);
+  dia += stripped;
+  if (opt.syllables){
+    useLanguage(opt.lang);
+    [out, hyphens] = hyphenateText(out, 1, 1);
+    useLanguage("en");
+  }
+  return { text: out, chars, dia, hyphens, markers };
+}
+
+/* ================================================================== */
+/* 6. Interface                                                       */
+/* ================================================================== */
+
+const $ = id => document.getElementById(id);
+const inBox = $("in"), outBox = $("out"), statusEl = $("status"), langSel = $("o-lang");
+const boxes = {
+  tags: $("o-tags"), numbering: $("o-numbering"), round: $("o-round"),
+  hyphens: $("o-hyphens"), syllables: $("o-syllables")
+};
+
+function currentOptions(){
+  const o = { lang: langSel.value };
+  for (const k in boxes) o[k] = boxes[k].checked;
+  return o;
+}
+
+const count = (n, noun) => `${n} ${noun}${n === 1 ? "" : "s"}`;
+
+function run(){
+  const src = inBox.value;
+  const r = processText(src, currentOptions());
+  outBox.value = r.text;
+
+  if (!src){ statusEl.textContent = "Paste or type some text"; return; }
+  const parts = [count(src.length, "character")];
+  if (r.chars) parts.push(count(r.chars, "replacement"));
+  if (r.dia) parts.push(`diacritics: ${r.dia}`);
+  if (r.markers) parts.push(count(r.markers, "marker") + " removed");
+  if (r.hyphens) parts.push(count(r.hyphens, "hyphen"));
+  if (parts.length === 1) parts.push("nothing to change");
+  statusEl.textContent = parts.join(", ");
+}
+
+inBox.addEventListener("input", run);
+langSel.addEventListener("change", run);
+for (const k in boxes) boxes[k].addEventListener("change", run);
+
+$("copy").addEventListener("click", async () => {
+  if (!outBox.value){ statusEl.textContent = "Nothing to copy"; return; }
+  try {
+    await navigator.clipboard.writeText(outBox.value);
+    statusEl.textContent = "Result copied";
+  } catch {
+    outBox.select(); document.execCommand("copy");
+    statusEl.textContent = "Result copied";
+  }
+});
+
+$("download").addEventListener("click", () => {
+  const blob = new Blob([outBox.value], {type:"text/plain;charset=utf-8"});
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "converted-lyrics.txt";
+  a.click();
+  URL.revokeObjectURL(a.href);
+  statusEl.textContent = "Saved as converted-lyrics.txt";
+});
+
+$("swap").addEventListener("click", () => { inBox.value = outBox.value; run(); inBox.focus(); });
+$("clear").addEventListener("click", () => { inBox.value = ""; run(); inBox.focus(); });
+
+function loadFile(file){
+  const reader = new FileReader();
+  reader.onload = () => { inBox.value = String(reader.result).replace(/^\uFEFF/, ""); run(); };
+  reader.onerror = () => { statusEl.textContent = "That file could not be read"; };
+  reader.readAsText(file, "utf-8");
+}
+$("file").addEventListener("change", e => { if (e.target.files[0]) loadFile(e.target.files[0]); });
+
+["dragenter","dragover"].forEach(ev => inBox.addEventListener(ev, e => {
+  e.preventDefault(); inBox.classList.add("drop");
+}));
+["dragleave","drop"].forEach(ev => inBox.addEventListener(ev, () => inBox.classList.remove("drop")));
+inBox.addEventListener("drop", e => {
+  e.preventDefault();
+  const f = e.dataTransfer.files[0];
+  if (f) loadFile(f);
+});
+
+/* The two panes scroll together. Only the pane the person is actually using
+   drives the other one: while a pane is being moved programmatically it is
+   locked, so its own scroll event cannot bounce back and fight the drag. */
+let driven = null;
+let releaseTimer = null;
+
+function linkScroll(from, to){
+  from.addEventListener("scroll", () => {
+    if (driven === from) return;          /* this scroll came from the other pane */
+    driven = to;
+    clearTimeout(releaseTimer);
+    const range = from.scrollHeight - from.clientHeight;
+    const ratio = range > 0 ? from.scrollTop / range : 0;
+    const target = ratio * (to.scrollHeight - to.clientHeight);
+    if (Math.abs(to.scrollTop - target) > 1) to.scrollTop = target;
+    releaseTimer = setTimeout(() => { driven = null; }, 150);
+  });
+}
+linkScroll(inBox, outBox);
+linkScroll(outBox, inBox);
+
+document.addEventListener("keydown", e => {
+  if ((e.ctrlKey || e.metaKey) && e.key === "Enter"){ e.preventDefault(); run(); }
+});
+
+run();
+</script>
+</body>
+</html>
