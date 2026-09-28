@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
 ================================================================================
-UG Lyrics Converter — version 1.40 — how this file is meant to be changed
+UG Lyrics Converter — version 1.41 — how this file is meant to be changed
 ================================================================================
 
 WHAT IT IS
@@ -79,7 +79,7 @@ LANGUAGES
 
 VERSION
   The minor number counts the rounds of changes the program has been through:
-  1.40 is the fortieth. Bump it by one with every change you hand back — even a
+  1.41 is the forty-first. Bump it by one with every change you hand back — even a
   one-word fix — so a file can always be placed in the sequence. The number lives
   in three places and they must stay in step: this comment, the line under the
   title on the page, and the file name. Name the reference list to match.
@@ -199,7 +199,7 @@ HOW TO CHANGE SOMETHING
 <header>
   <h1>UG Lyrics Converter</h1>
   <p class="sub">Cleans up lyrics and splits the words into syllables. Everything runs in your
-     browser — no text leaves this page. <span class="version">v1.40</span></p>
+     browser — no text leaves this page. <span class="version">v1.41</span></p>
 </header>
 
 <section class="settings">
@@ -1073,6 +1073,9 @@ const WORD_EXCEPTIONS = {
   opera:"ope-ra",
   /* non- is not a prefix in the program: it would spoil none-the-less */
   nonstop:"non-stop",
+  /* the silent e of nine stays with its own syllable across the seam */
+  nineteen:"nine-teen", nineteenth:"nine-teenth", ninety:"nine-ty",
+  ninetieth:"nine-tieth", nineties:"nine-ties", hundredth:"hund-redth",
   /* a word the letters would split but the voice does not */
   eye:"eye",
   /* spellings that do not follow from the letters */
