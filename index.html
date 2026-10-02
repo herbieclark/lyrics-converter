@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <!--
 ================================================================================
-UG Lyrics Converter — version 1.41 — how this file is meant to be changed
+UG Lyrics Converter — version 1.44 — how this file is meant to be changed
 ================================================================================
 
 WHAT IT IS
@@ -79,7 +79,7 @@ LANGUAGES
 
 VERSION
   The minor number counts the rounds of changes the program has been through:
-  1.41 is the forty-first. Bump it by one with every change you hand back — even a
+  1.44 is the forty-fourth. Bump it by one with every change you hand back — even a
   one-word fix — so a file can always be placed in the sequence. The number lives
   in three places and they must stay in step: this comment, the line under the
   title on the page, and the file name. Name the reference list to match.
@@ -199,7 +199,7 @@ HOW TO CHANGE SOMETHING
 <header>
   <h1>UG Lyrics Converter</h1>
   <p class="sub">Cleans up lyrics and splits the words into syllables. Everything runs in your
-     browser — no text leaves this page. <span class="version">v1.41</span></p>
+     browser — no text leaves this page. <span class="version">v1.44</span></p>
 </header>
 
 <section class="settings">
@@ -231,6 +231,15 @@ HOW TO CHANGE SOMETHING
       <option value="ru">Russian</option>
       <option value="uk">Ukrainian</option>
       <option value="pl">Polish</option>
+      <option value="fi">Finnish</option>
+      <option value="hi">Hindi / Urdu</option>
+      <option value="hr">Croatian</option>
+      <option value="sr">Serbian</option>
+      <option value="cs">Czech</option>
+      <option value="nl">Dutch</option>
+      <option value="da">Danish</option>
+      <option value="no">Norwegian</option>
+      <option value="tr">Turkish</option>
     </select>
   </div>
 </section>
@@ -363,8 +372,22 @@ HOW TO CHANGE SOMETHING
        <code>cz sz rz dz szcz prz</code> for Polish, <code>sch</code> for German, <code>gn</code> for
        French, <code>ll rr</code> for Spanish, <code>gn gl sc gh</code> for Italian, <code>ng ny</code>
        for Bahasa Indonesia and Tagalog, <code>zh kh ts shch</code> for Russian and Ukrainian.
+       Finnish lets a single consonant open a syllable and nothing else
+       (<code>kirk-ko</code>, <code>ys-ta-va</code>), and keeps its diphthongs and long
+       vowels whole (<code>Suo-mi</code>, <code>kii-tos</code>, <code>kau-nis</code>) while
+       every other vowel pair splits (<code>ra-di-o</code>, <code>tah-ti-a</code>).
        Spanish keeps <code>s</code> at the end of a syllable (<code>es-tre-lla</code>) while Italian
        opens the next one with it (<code>que-sto</code>).</p>
+    <p>Turkish works like Finnish: one consonant opens a syllable and every vowel counts on its
+       own (<code>mer-ha-ba</code>, <code>sa-at</code>, <code>e-lekt-rik</code>). Croatian and
+       Serbian share a set where <code>lj nj dz</code> are single letters and a cluster that can
+       open a word opens a syllable (<code>lju-bav</code>, <code>pje-sma</code>), while Czech keeps
+       <code>ch</code> whole but splits <code>st</code> (<code>ses-tra</code>, <code>las-ka</code>).
+       Danish and Norwegian share <code>sj kj gj hj hv sk</code> (<code>hjer-te</code>,
+       <code>stjer-ne</code>), Dutch keeps its vowel digraphs and <code>sch</code> together
+       (<code>schoon-heid</code>, <code>moo-ie</code>), and romanized Hindi and Urdu keep the
+       aspirates whole (<code>bha-rat</code>, <code>khu-shi</code>) with <code>y</code> always a
+       consonant (<code>pyaar</code>, <code>du-ni-ya</code>).</p>
     <p>Korean, Japanese, Bahasa Indonesia and Tagalog are handled from their romanized spelling. For
        Japanese every vowel is a mora and gets its own note, so each one becomes a syllable
        (<code>a-ri-ga-to-u</code>, <code>ka-wa-i-i</code>) and <code>y</code> is always a consonant
@@ -699,6 +722,8 @@ const LANGS = {
      remove      — shared onsets this language does not use
      hiatus      — vowel pairs that are two syllables
      allHiatus   — every vowel pair is two syllables, except those in noHiatus
+     onsetsOff   — no consonant cluster opens a syllable (Finnish)
+     longVowelSplit — a vowel after a long one starts a syllable: maa-il-ma
      yConsonant  — y before a vowel is always a consonant, never a nucleus */
   en: { morphology:true, silentFinalE:true,
         digraphs:["ch","sh","th","ph","wh","gh","qu"],   /* rh only opens a word: per-haps */
@@ -726,6 +751,15 @@ const LANGS = {
         digraphs:["ch","gh","gn","gl","sc","qu"],
         onset2:["st","sp","sk","sf","sl","sm","sn","sv","sb","sd","sg"],
         hiatus:["ae","ao","ea","eo","oa","oe"] },
+
+  fi: { silentFinalE:false,
+        /* only one consonant opens a syllable: kirk-ko, ys-ta-va, met-sas-sa */
+        onsetsOff:true,
+        /* every vowel pair is two syllables except the diphthongs and the long
+           vowels, which are a closed list in Finnish */
+        allHiatus:true, longVowelSplit:true,
+        noHiatus:["ai","ei","oi","ui","yi","au","eu","iu","ou","ey","iy","ay","oy",
+                  "yo","ie","uo","aa","ee","ii","oo","uu","yy"] },
 
   id: { silentFinalE:false,
         digraphs:["ng","ny","sy","kh"],
@@ -759,6 +793,42 @@ const LANGS = {
         onset3:["shc","str","zdr","stv"],
         hiatus:["ia","io","iu","ie","eo","ea","oa"] },
 
+  hi: { silentFinalE:false,          /* romanized Hindi and Urdu */
+        digraphs:["kh","gh","ch","jh","th","dh","ph","bh","sh","zh"],
+        onset3:["chh","shh"],
+        yConsonant:true,
+        allHiatus:true, noHiatus:["aa","ee","ii","oo","uu","ai","au","ei","ou"] },
+
+  hr: { silentFinalE:false,          /* Croatian: maximal onset, lj nj dz are letters */
+        digraphs:["lj","nj","dz","dj"],
+        onset2:["st","sp","sk","sc","sl","sm","sn","sv","sw","zd","zn","zv","zb",
+                "tv","dv","kv","gn","kn","mn","hv","hr","vl","zl"],
+        onset3:["str","spr","skr","zdr","stv","svj","zvj"],
+        allHiatus:true, noHiatus:["au","eu","ou","ai","ei","oi","ui"] },
+
+  cs: { silentFinalE:false,          /* Czech: ch is one letter; a stop plus a
+                                        liquid opens the next syllable: ses-tra */
+        digraphs:["ch"],
+        remove:["str","spr","scr","spl","shr"],
+        onset3:["chl","chr"],
+        allHiatus:true, noHiatus:["au","eu","ou"] },
+
+  nl: { silentFinalE:false,          /* Dutch: vowel digraphs stay, sch is one onset */
+        digraphs:["ch","sj","zw","kn","tw","dw"],
+        onset3:["sch","schr","str","spr"],
+        longVowelSplit:true,           /* moo-ie, draa-ien */
+        hiatus:["ia","io","ea","eo","oa","ao"] },
+
+  da: { silentFinalE:false,          /* Danish and Norwegian share these */
+        digraphs:["sj","kj","gj","hj","hv","sk","sp","st"],
+        onset3:["skj","str","spr","skr"],
+        hiatus:["ia","io","ea","eo","oa","ao"] },
+
+  tr: { silentFinalE:false,          /* Turkish: one consonant opens a syllable,
+                                        every vowel is a syllable of its own */
+        onsetsOff:true,
+        allHiatus:true, noHiatus:[] },
+
   pl: { silentFinalE:false,
         digraphs:["cz","sz","rz","dz","ch","zi","si","ci"],
         onset2:["st","sp","sk","sc","sl","sm","sn","sw","zd","zg","zb","zn","zl",
@@ -766,6 +836,9 @@ const LANGS = {
         onset3:["prz","trz","brz","krz","grz","drz","szc","str","chl","chr"],
         hiatus:[] }
 };
+
+LANGS.sr = LANGS.hr;   /* Serbian in Latin script works by the Croatian rules */
+LANGS.no = LANGS.da;   /* Norwegian shares the Danish set */
 
 let CFG = null;
 
@@ -778,9 +851,10 @@ function useLanguage(code){
     silentFinalE: !!lang.silentFinalE,
     yConsonant: !!lang.yConsonant,
     allHiatus: !!lang.allHiatus,
+    longVowelSplit: !!lang.longVowelSplit,
     digraphs: new Set(keep(lang.digraphs || [])),
-    onset2: new Set(keep([...BASE_ONSET2, ...(lang.onset2 || [])])),
-    onset3: new Set(keep([...BASE_ONSET3, ...(lang.onset3 || [])])),
+    onset2: new Set(lang.onsetsOff ? [] : keep([...BASE_ONSET2, ...(lang.onset2 || [])])),
+    onset3: new Set(lang.onsetsOff ? [] : keep([...BASE_ONSET3, ...(lang.onset3 || [])])),
     closing: new Set(lang.closing || []),
     hiatus: new Set(lang.hiatus || []),
     noHiatus: new Set(lang.noHiatus || [])
@@ -821,6 +895,7 @@ const ER_NOT_SUFFIX = new Set([
   "water","river","flower","power","tower","shower","weather","feather","leather","thunder",
   "silver","timber","ember","amber","powder","fever","liver","shiver","quiver",
   "spider","tiger","ginger","finger","shoulder","paper","poster","monster","cider",
+  "clover","silver","sliver","otter",
   /* time */
   "ever","never","over","under","after","winter","september","october","november","december",
   /* abstractions */
@@ -866,17 +941,24 @@ function nuclei(word){
       for (let k = i; k < j; k++){
         const pair = w[k] + w[k+1];
         let split = CFG.allHiatus ? !CFG.noHiatus.has(pair) : CFG.hiatus.has(pair);
-        if (split && (pair === "ia" || pair === "io") && k > 0 && HIATUS_BLOCKERS.has(w[k-1])){
-          split = false;   /* nation, special, patient, mil-lion, fash-ion */
+        /* these two blockers spell out English habits, so they stay with English:
+           nation, special, mil-lion, fash-ion, gor-geous, pi-geon */
+        if (split && CFG.morphology && (pair === "ia" || pair === "io") &&
+            k > 0 && HIATUS_BLOCKERS.has(w[k-1])){
+          split = false;
         }
-        if (split && pair === "eo" && k > 0 && EO_BLOCKERS.has(w[k-1])){
-          split = false;   /* gor-geous, cou-ra-geous, pi-geon */
+        if (split && CFG.morphology && pair === "eo" && k > 0 && EO_BLOCKERS.has(w[k-1])){
+          split = false;
         }
         /* u before another vowel is a syllable of its own after some consonants and
            not after others: ri-tu-al, ca-su-al, an-nu-al, flu-ent, du-el, ge-nu-ine,
            but va-lua-ble, cruel, fuel, lan-guage, guest, queen */
         const before = k > 0 ? w[k-1] : "";
         if (!split && before && GLIDE_HIATUS[pair] && GLIDE_HIATUS[pair].includes(before)){
+          split = true;
+        }
+        /* a vowel right after a long one opens a syllable: maa-il-ma, tuu-li-nen */
+        if (!split && CFG.longVowelSplit && k > 0 && w[k-1] === w[k] && w[k] !== w[k+1]){
           split = true;
         }
         /* -ing after a vowel is its own syllable: be-ing, see-ing, do-ing */
@@ -1052,7 +1134,7 @@ const WORD_EXCEPTIONS = {
   trial:"tri-al", dial:"di-al", denial:"de-ni-al", requiem:"re-qui-em",
   transient:"tran-si-ent", transience:"tran-si-ence", ole:"o-le",
   /* diphthongs that are really two syllables */
-  hour:"ho-ur", sour:"so-ur", flour:"flo-ur",
+  hour:"ho-ur", sour:"so-ur", flour:"flo-ur", poetry:"po-et-ry",
   dialogue:"di-a-logue", monologue:"mo-no-logue", catalogue:"ca-ta-logue",
   argue:"ar-gue", colleague:"col-lea-gue", aches:"aches", mercedes:"mer-ce-des",
   /* stress the rules cannot hear */
